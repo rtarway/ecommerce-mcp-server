@@ -8,6 +8,7 @@ const schema = z.object({
   JWKS_URL: z.url(),
   /** Public MCP endpoint URL on the gateway; the expected `aud` of access tokens. */
   RESOURCE_URL: z.url(),
+  DEBUG_REQUESTS: z.stringbool().default(false),
 });
 
 export type Config = z.infer<typeof schema> & { resourceMetadataUrl: string };

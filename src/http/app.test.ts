@@ -87,6 +87,39 @@ describe("HTTP gate", () => {
   });
 });
 
+describe("server-issued sessions", () => {
+  const init = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } };
+
+  it("issues an unguessable Mcp-Session-Id on initialize", async () => {
+    const a = (await rpc(init)).headers.get("mcp-session-id");
+    const b = (await rpc(init)).headers.get("mcp-session-id");
+    expect(a).toMatch(/^[0-9a-f-]{36}$/);
+    expect(a).not.toBe(b);
+  });
+
+  it("does not issue a session for other requests", async () => {
+    expect((await rpc(call("product_search"))).headers.get("mcp-session-id")).toBeNull();
+  });
+});
+
+describe("session identity from the gateway", () => {
+  it("keys anonymous carts by the gateway-provided x-mcp-session-id (the gateway terminates Mcp-Session-Id)", async () => {
+    const hdr = { "x-mcp-session-id": "gw-session-1" };
+    const add = await rpc(call("add_to_cart", { productId: "bottle-001", quantity: 1 }), hdr);
+    expect(add.status).toBe(200);
+    const body = JSON.stringify(await add.json());
+    expect(body).not.toMatch(/No session/);
+  });
+
+  it("prefers the gateway header over a client-sent Mcp-Session-Id", async () => {
+    const res = await rpc(call("add_to_cart", { productId: "bottle-001", quantity: 1 }), {
+      "x-mcp-session-id": "gw-session-2",
+      "mcp-session-id": "client-claimed",
+    });
+    expect(JSON.stringify(await res.json())).not.toMatch(/No session/);
+  });
+});
+
 describe("end to end through the MCP client SDK", () => {
   it("browse + add anonymously, then check out after the customer signs in", async () => {
     const sessionHeaders = { "mcp-session-id": "e2e-session" };

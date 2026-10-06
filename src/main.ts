@@ -11,6 +11,7 @@ const app = createApp({
   resource: config.RESOURCE_URL,
   issuer: config.ISSUER,
   resourceMetadataUrl: config.resourceMetadataUrl,
+  debug: config.DEBUG_REQUESTS,
 });
 
 app.listen(config.PORT, () => console.log(`ecommerce-mcp-server listening on :${config.PORT}`));

@@ -1,0 +1,29 @@
+# Exposes the server through the shared agentgateway (installed by the infra repo).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata: { name: ecommerce-mcp-backend, namespace: mcp-servers }
+spec:
+  mcp:
+    prefixMode: Never # single target: keep tool names exactly as the server defines them
+    targets:
+    - name: shop
+      static:
+        host: ecommerce-mcp-server.mcp-servers.svc.cluster.local
+        port: 80
+        protocol: StreamableHTTP
+        path: /mcp
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: ecommerce-mcp, namespace: mcp-servers }
+spec:
+  parentRefs:
+  - { name: agentgateway-proxy, namespace: agentgateway-system }
+  rules:
+  - matches: [{ path: { type: PathPrefix, value: /mcp } }]
+    backendRefs:
+    - { group: agentgateway.dev, kind: AgentgatewayBackend, name: ecommerce-mcp-backend }
+  # OAuth protected-resource metadata is served by the app itself (plain HTTP backend).
+  - matches: [{ path: { type: PathPrefix, value: /.well-known/oauth-protected-resource } }]
+    backendRefs:
+    - { name: ecommerce-mcp-server, port: 80 }

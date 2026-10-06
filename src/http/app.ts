@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { InvalidTokenError, bearerToken, type Identity } from "../auth/tokens.js";
@@ -12,6 +13,8 @@ export interface AppConfig {
   resource: string;
   issuer: string;
   resourceMetadataUrl: string;
+  /** Log request shape (JSON-RPC methods + header names, never values) to debug proxies/gateways. */
+  debug?: boolean;
 }
 
 /** Tool name -> scope required to call it. Everything else is open to anonymous visitors. */
@@ -21,6 +24,11 @@ const MAX_BODY_BYTES = 1_000_000;
 
 function sendJson(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
   res.writeHead(status, { "content-type": "application/json", ...headers }).end(JSON.stringify(body));
+}
+
+function firstHeader(req: IncomingMessage, name: string): string | undefined {
+  const value = req.headers[name];
+  return (Array.isArray(value) ? value[0] : value) || undefined;
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -54,6 +62,11 @@ export function createApp(config: AppConfig): Server {
       return sendJson(res, 400, { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
     }
 
+    if (config.debug) {
+      const methods = (Array.isArray(body) ? body : [body]).map((m) => (m as { method?: string })?.method);
+      console.log(`mcp request methods=${methods.join(",")} headers=${Object.keys(req.headers).sort().join(",")} session=${String(req.headers["mcp-session-id"] ?? "-")}`);
+    }
+
     let identity: Identity | undefined;
     const token = bearerToken(req.headers.authorization);
     if (token) {
@@ -78,10 +91,15 @@ export function createApp(config: AppConfig): Server {
       }
     }
 
-    const sessionHeader = req.headers["mcp-session-id"];
-    const sessionId = Array.isArray(sessionHeader) ? sessionHeader[0] : sessionHeader;
+    // The gateway terminates the client's Mcp-Session-Id and hands it down as x-mcp-session-id.
+    // Mcp-Session-Id is only honoured as a fallback when running without a gateway.
+    const sessionId = firstHeader(req, "x-mcp-session-id") ?? firstHeader(req, "mcp-session-id");
 
     // Stateless transport: one server + transport per request. Sessions are owned by the gateway.
+    // Sessions are issued by the server (MCP spec); the gateway pairs them with the client's own session.
+    const isInitialize = (Array.isArray(body) ? body : [body]).some((m) => (m as { method?: string })?.method === "initialize");
+    if (isInitialize) res.setHeader("mcp-session-id", randomUUID());
+
     const mcp = createShopServer(shop, { sessionId, identity });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on("close", () => {
