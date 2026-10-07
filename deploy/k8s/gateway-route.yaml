@@ -21,6 +21,16 @@ spec:
   - { name: agentgateway-proxy, namespace: agentgateway-system }
   rules:
   - matches: [{ path: { type: PathPrefix, value: /mcp } }]
+    # Lets browser-based MCP clients (MCP Inspector UI on :6274/:6277) call the endpoint directly.
+    filters:
+    - type: CORS
+      cors:
+        allowOrigins: ["http://localhost:6274", "http://127.0.0.1:6274", "http://localhost:6277", "http://127.0.0.1:6277"]
+        allowCredentials: true
+        allowMethods: [GET, POST, DELETE, OPTIONS]
+        allowHeaders: [Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID]
+        exposeHeaders: [Mcp-Session-Id, WWW-Authenticate]
+        maxAge: 86400
     backendRefs:
     - { group: agentgateway.dev, kind: AgentgatewayBackend, name: ecommerce-mcp-backend }
   # OAuth protected-resource metadata is served by the app itself (plain HTTP backend).

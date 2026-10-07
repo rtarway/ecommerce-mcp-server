@@ -159,8 +159,7 @@ Open the URL it prints (it contains a one-time API token). Then:
 2. **product_search** with `query = running shoes`. *Expect:* two shoe products.
 3. **add_to_cart** `productId = shoe-trail-001`, `quantity = 1`. *Expect:* cart total 89.99.
 4. **one_step_checkout** (no arguments). *Expect:* a 401 and Inspector offering/starting **OAuth**.
-5. Complete OAuth: use **client ID `mcp-test-client`** (pre-registered; anonymous dynamic registration is
-   deliberately refused by Keycloak's Trusted Hosts policy). Scope: `openid ecommerce:checkout`.
+5. Complete OAuth (see "Client registration for Inspector" below for the two ways to get a client id).
    Log in as `testuser` / the `test_user_password`. *Expect:* **consent screen on the first login only.**
 6. Run **one_step_checkout** again. *Expect:* `ord_…`, total 89.99, card `visa •••• 4242`,
    Springfield address. The anonymous cart from step 3 was claimed into the order.
@@ -169,6 +168,37 @@ Open the URL it prints (it contains a one-time API token). Then:
 Note: steps 4–5 follow the standard MCP OAuth flow and were verified headlessly (same requests via
 `test/e2e`), but I could not drive the Inspector's browser UI in the build session — treat the exact
 button labels as approximate.
+
+### Client registration for Inspector
+
+An OAuth client needs a `client_id` before it can log anyone in. Inspector's redirect URI is
+`http://localhost:6274/oauth/callback`. Two ways:
+
+**A. Dynamic registration (RFC 7591) — Inspector does it automatically.** Inspector reads Keycloak's
+`registration_endpoint` from the discovery metadata and registers itself as a public PKCE client.
+`scripts/keycloak-setup.sh` makes this work for localhost only: it adds `localhost`/`127.0.0.1` to the realm's
+*Trusted Hosts* policy, allows the `ecommerce:checkout` scope for anonymous registrations, and offers that
+scope to new clients. Keycloak's *Consent Required* policy forces every dynamically registered client through
+the consent screen. Leave the client-ID field empty in Inspector's auth settings. Each Inspector session may
+register a new client (up to the realm's *Max Clients* limit of 200); consent is per client, so a newly
+registered client sees the consent screen again.
+
+**B. Pre-registered client.** Enter client ID `mcp-test-client` (public, PKCE, redirect URIs
+`http://localhost:*`) in Inspector's OAuth settings. Consent is remembered across sessions because the id is stable.
+
+Manual check of A:
+
+```bash
+curl -s -X POST localhost:8080/realms/mcp/clients-registrations/openid-connect \
+  -H 'content-type: application/json' \
+  -d '{"client_name":"MCP Inspector","redirect_uris":["http://localhost:6274/oauth/callback"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none","scope":"ecommerce:checkout"}'
+```
+
+Expect JSON with a `client_id`. `Host not trusted` means `scripts/keycloak-setup.sh` has not been run.
+
+Inspector is a browser app, so its discovery, registration and token calls are cross-origin. Keycloak allows
+that for the Inspector origin; the server serves its discovery document with `Access-Control-Allow-Origin: *`,
+and the gateway route has a CORS filter for `localhost:6274/6277` (`deploy/k8s/gateway-route.yaml`).
 
 ### 4c. Full automated journey (no Inspector)
 
@@ -180,7 +210,7 @@ TEST_USER_PASSWORD=… KC_ADMIN_PASSWORD=… npm run test:e2e
 ## 5. Development loop
 
 ```bash
-npm ci && npm test            # 52 unit/in-process tests, no network
+npm ci && npm test            # 54 unit/in-process tests, no network
 npm run typecheck
 docker build -t ecommerce-mcp-server:dev . && kubectl apply -k deploy/k8s
 kubectl -n mcp-servers rollout restart deploy/ecommerce-mcp-server   # picks up the rebuilt image
@@ -196,6 +226,7 @@ Set `DEBUG_REQUESTS=true` in `deploy/k8s/shop-mcp.yaml` to log request shapes (h
 | `localhost:8080` returns 404 | Something else holds 8080 (Rancher forwards LoadBalancer ports). The gateway must listen on 8000, not 8080; restart the Keycloak port-forward. |
 | `invalid_token: token has no subject` | Realm lacks Keycloak's built-in scopes; infra realm must not declare its own `clientScopes`. |
 | First call after rollout: `upstream call timeout` | Pod warming up; retry after ~15 s. |
+| Inspector OAuth: "Failed to fetch" / registration error | Re-run `scripts/keycloak-setup.sh` (trusted hosts + scope policy) and redeploy so the CORS filter and discovery CORS headers are live. Check the browser dev-tools Network tab for the failing URL. |
 | Consent screen never appears | Consent already stored; revoke it (4b step 7) or re-run the e2e (it resets consent). |
 | Token rejected: audience | `scripts/keycloak-setup.sh` must run with `RESOURCE_URL` equal to the deployment's `RESOURCE_URL` (`http://localhost:8000/mcp`). |
 

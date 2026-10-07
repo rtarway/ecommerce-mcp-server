@@ -115,12 +115,17 @@ export function createApp(config: AppConfig): Server {
     const route = async () => {
       if (path === "/healthz") return sendJson(res, 200, { status: "ok" });
       if (path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/mcp") {
+        // Public discovery document: browser-based clients (e.g. MCP Inspector) fetch it cross-origin.
+        const cors = { "access-control-allow-origin": "*" };
+        if (req.method === "OPTIONS") {
+          return void res.writeHead(204, { ...cors, "access-control-allow-methods": "GET, OPTIONS", "access-control-allow-headers": "*", "access-control-max-age": "86400" }).end();
+        }
         return sendJson(res, 200, {
           resource,
           authorization_servers: [issuer],
           scopes_supported: [CHECKOUT_SCOPE],
           bearer_methods_supported: ["header"],
-        });
+        }, cors);
       }
       if (path === "/mcp") {
         if (req.method !== "POST") return sendJson(res, 405, { error: "method_not_allowed" }, { allow: "POST" });

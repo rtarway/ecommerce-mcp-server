@@ -87,6 +87,24 @@ describe("HTTP gate", () => {
   });
 });
 
+describe("CORS for browser-based clients (OAuth discovery)", () => {
+  it("serves protected-resource metadata to any origin, without credentials", async () => {
+    const res = await fetch(`${base}/.well-known/oauth-protected-resource/mcp`, { headers: { origin: "http://localhost:6274" } });
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    expect(res.headers.get("access-control-allow-credentials")).toBeNull();
+  });
+
+  it("answers preflight for the metadata endpoint", async () => {
+    const res = await fetch(`${base}/.well-known/oauth-protected-resource/mcp`, {
+      method: "OPTIONS",
+      headers: { origin: "http://localhost:6274", "access-control-request-method": "GET" },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+    expect(res.headers.get("access-control-allow-methods")).toMatch(/GET/);
+  });
+});
+
 describe("server-issued sessions", () => {
   const init = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } };
 

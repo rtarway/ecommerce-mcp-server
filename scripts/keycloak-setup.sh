@@ -5,6 +5,8 @@
 #   - `mcp-groups`    : `groups` claim (used by gateway authorization rules)
 #   - `ecommerce:checkout` : consent scope (step-up). Optional, so only requested at checkout.
 # Both default scopes are also made realm defaults so dynamically registered clients get them.
+#   - dynamic client registration (RFC 7591) for local MCP clients such as MCP Inspector: trust
+#     localhost, allow the checkout scope, and offer it to new clients as an optional scope.
 # Usage: KC_ADMIN_PASSWORD=... [KC_URL=http://localhost:8080] [RESOURCE_URL=http://localhost:8000/mcp] scripts/keycloak-setup.sh
 set -euo pipefail
 
@@ -49,9 +51,24 @@ for id in "$AUD_ID" "$GROUPS_ID"; do
   case " $REALM_DEFAULTS " in *" $id "*) ;; *) api PUT "/default-default-client-scopes/$id" >/dev/null ;; esac
 done
 
+# --- Dynamic client registration for local clients (lab only: trusts localhost) ---
+REALM_OPTIONALS=$(api GET "/default-optional-client-scopes" | json "print(' '.join(s['id'] for s in d))")
+case " $REALM_OPTIONALS " in *" $CHECKOUT_ID "*) ;; *) api PUT "/default-optional-client-scopes/$CHECKOUT_ID" >/dev/null ;; esac
+
+# set_policy <providerId> <python expr mutating config dict `c`>
+set_policy() {
+  local comp; comp=$(api GET "/components?type=org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy" \
+    | json "print(json.dumps(next(x for x in d if x['subType']=='anonymous' and x['providerId']=='$1')))")
+  local id; id=$(json "print(d['id'])" <<<"$comp")
+  api PUT "/components/$id" -d "$(json "c=d.setdefault('config',{});$2;print(json.dumps(d))" <<<"$comp")" >/dev/null
+}
+set_policy trusted-hosts "c['trusted-hosts']=['localhost','127.0.0.1']"
+set_policy allowed-client-templates "c['allowed-client-scopes']=['ecommerce:checkout','openid']"
+
 CID=$(api GET "/clients?clientId=$CLIENT_ID" | json "print(d[0]['id'])")
 for id in "$AUD_ID" "$GROUPS_ID"; do api PUT "/clients/$CID/default-client-scopes/$id" >/dev/null; done
 api PUT "/clients/$CID/optional-client-scopes/$CHECKOUT_ID" >/dev/null
 CLIENT_JSON=$(api GET "/clients/$CID" | json "d['consentRequired']=True;print(json.dumps(d))")
 api PUT "/clients/$CID" -d "$CLIENT_JSON" >/dev/null
+echo "dynamic registration: localhost trusted, ecommerce:checkout allowed + optional for new clients"
 echo "client $CLIENT_ID: consentRequired, default scopes + audience=$RESOURCE_URL, optional scope ecommerce:checkout"
