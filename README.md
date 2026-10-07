@@ -15,6 +15,8 @@ Authorization Code + PKCE against Keycloak; Keycloak shows the consent screen th
 
 State (carts, orders) is in memory — single replica, POC. Customer profiles are seed data (`src/seed.ts`).
 
+#See [docs/GUIDE.md](docs/GUIDE.md) for the architecture, infra setup, and MCP Inspector test guide.
+
 ## Develop
 
 ```bash
@@ -34,7 +36,7 @@ Layering (each unit is test-driven in isolation): `src/domain` (catalog, cart, c
 docker build -t ecommerce-mcp-server:dev .          # Rancher's Docker shares images with k8s
 KC_ADMIN_PASSWORD=… scripts/keycloak-setup.sh        # audience / groups / ecommerce:checkout scopes (idempotent)
 kubectl apply -k deploy/k8s                          # Deployment, Service, AgentgatewayBackend, HTTPRoute
-kubectl port-forward -n agentgateway-system svc/agentgateway-proxy 8000:8080
+# the gateway is published by Rancher Desktop on localhost:8000 (no port-forward needed)
 kubectl port-forward -n keycloak svc/keycloak-service 8080:8080
 ```
 
