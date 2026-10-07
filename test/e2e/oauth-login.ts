@@ -12,6 +12,8 @@ export interface LoginParams {
   scope: string;
   username: string;
   password: string;
+  /** Send this Origin on the token request, as a browser client would; reports the CORS verdict. */
+  browserOrigin?: string;
 }
 
 const decode = (s: string) => s.replace(/&amp;/g, "&");
@@ -95,7 +97,7 @@ export async function loginWithPkce(p: LoginParams) {
   if (!code) throw new Error(`no code in redirect: ${done}`);
   const tokenRes = await fetch(p.tokenEndpoint, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers: { "content-type": "application/x-www-form-urlencoded", ...(p.browserOrigin ? { origin: p.browserOrigin } : {}) },
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
@@ -106,5 +108,6 @@ export async function loginWithPkce(p: LoginParams) {
   });
   if (!tokenRes.ok) throw new Error(`token exchange failed: ${await tokenRes.text()}`);
   const tokens = (await tokenRes.json()) as { access_token: string; scope: string };
-  return { accessToken: tokens.access_token, grantedScope: tokens.scope, consentShown };
+  const tokenCorsOrigin = tokenRes.headers.get("access-control-allow-origin");
+  return { accessToken: tokens.access_token, grantedScope: tokens.scope, consentShown, tokenCorsOrigin };
 }

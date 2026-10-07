@@ -179,7 +179,7 @@ An OAuth client needs a `client_id` before it can log anyone in. Inspector's red
 `scripts/keycloak-setup.sh` makes this work for localhost only: it adds `localhost`/`127.0.0.1` to the realm's
 *Trusted Hosts* policy, allows the `ecommerce:checkout` scope for anonymous registrations, and offers that
 scope to new clients. Keycloak's *Consent Required* policy forces every dynamically registered client through
-the consent screen. Leave the client-ID field empty in Inspector's auth settings. Each Inspector session may
+the consent screen. Leave the client-ID field empty in Inspector's auth settings. Inspector registers with `client_uri` on github.com and from the browser origin `http://localhost:6274`, so the script trusts `github.com` and lists Inspector's origins in the *Allowed Registration Web Origins* policy. Each Inspector session may
 register a new client (up to the realm's *Max Clients* limit of 200); consent is per client, so a newly
 registered client sees the consent screen again.
 
@@ -226,6 +226,9 @@ Set `DEBUG_REQUESTS=true` in `deploy/k8s/shop-mcp.yaml` to log request shapes (h
 | `localhost:8080` returns 404 | Something else holds 8080 (Rancher forwards LoadBalancer ports). The gateway must listen on 8000, not 8080; restart the Keycloak port-forward. |
 | `invalid_token: token has no subject` | Realm lacks Keycloak's built-in scopes; infra realm must not declare its own `clientScopes`. |
 | First call after rollout: `upstream call timeout` | Pod warming up; retry after ~15 s. |
+| DCR `403 … Trusted Hosts … URL doesn't match any trusted host` | Inspector registers with `client_uri=https://github.com/modelcontextprotocol/inspector`; Keycloak requires every registered URL to match a trusted host. `scripts/keycloak-setup.sh` trusts `localhost`, `127.0.0.1`, `github.com`. |
+| DCR `403 {"error":"Invalid origin"}` | The *Allowed Registration Web Origins* policy was empty. The script lists Inspector's origins (`localhost`/`127.0.0.1` on `:6274`, `:6277`). |
+| DCR `… Not permitted to use specified clientScope` | Script allows `ecommerce:checkout` and `openid` for anonymous registrations. |
 | Inspector OAuth: "Failed to fetch" / registration error | Re-run `scripts/keycloak-setup.sh` (trusted hosts + scope policy) and redeploy so the CORS filter and discovery CORS headers are live. Check the browser dev-tools Network tab for the failing URL. |
 | Consent screen never appears | Consent already stored; revoke it (4b step 7) or re-run the e2e (it resets consent). |
 | Token rejected: audience | `scripts/keycloak-setup.sh` must run with `RESOURCE_URL` equal to the deployment's `RESOURCE_URL` (`http://localhost:8000/mcp`). |

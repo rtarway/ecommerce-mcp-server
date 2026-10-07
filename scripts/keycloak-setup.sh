@@ -6,7 +6,8 @@
 #   - `ecommerce:checkout` : consent scope (step-up). Optional, so only requested at checkout.
 # Both default scopes are also made realm defaults so dynamically registered clients get them.
 #   - dynamic client registration (RFC 7591) for local MCP clients such as MCP Inspector: trust
-#     localhost, allow the checkout scope, and offer it to new clients as an optional scope.
+#     localhost (+ github.com: MCP Inspector sends client_uri=https://github.com/modelcontextprotocol/inspector,
+#     and Keycloak requires every registered URL to match a trusted host), allow the checkout scope, and offer it to new clients as an optional scope.
 # Usage: KC_ADMIN_PASSWORD=... [KC_URL=http://localhost:8080] [RESOURCE_URL=http://localhost:8000/mcp] scripts/keycloak-setup.sh
 set -euo pipefail
 
@@ -62,7 +63,9 @@ set_policy() {
   local id; id=$(json "print(d['id'])" <<<"$comp")
   api PUT "/components/$id" -d "$(json "c=d.setdefault('config',{});$2;print(json.dumps(d))" <<<"$comp")" >/dev/null
 }
-set_policy trusted-hosts "c['trusted-hosts']=['localhost','127.0.0.1']"
+set_policy trusted-hosts "c['trusted-hosts']=['localhost','127.0.0.1','github.com']"
+# Browser clients send an Origin header; Keycloak rejects registrations from origins not listed here.
+set_policy registration-web-origins "c['web-origins']=['http://localhost:6274','http://127.0.0.1:6274','http://localhost:6277','http://127.0.0.1:6277']"
 set_policy allowed-client-templates "c['allowed-client-scopes']=['ecommerce:checkout','openid']"
 
 CID=$(api GET "/clients?clientId=$CLIENT_ID" | json "print(d[0]['id'])")
