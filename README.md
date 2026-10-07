@@ -15,7 +15,8 @@ Authorization Code + PKCE against Keycloak; Keycloak shows the consent screen th
 
 State (carts, orders) is in memory — single replica, POC. Customer profiles are seed data (`src/seed.ts`).
 
-#See [docs/GUIDE.md](docs/GUIDE.md) for the architecture, infra setup, and MCP Inspector test guide.
+#See [docs/GUIDE.md](docs/GUIDE.md) for the architecture, infra setup, and MCP Inspector test guide,
+and [docs/SECURITY.md](docs/SECURITY.md) for the security review, gaps and target architecture.
 
 ## Develop
 
