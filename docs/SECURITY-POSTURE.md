@@ -9,7 +9,7 @@ hard for legitimate shoppers.
 
 **Status as of 2026-10-12.** Every vector below was exercised against the running stack by the attack lab
 (`test/attack/lab.ts`; latest run in [ATTACK-RESULTS.md](ATTACK-RESULTS.md); the only scenario that gets through is
-the known open item D4) and/or by unit tests (180, `npm test`). MCP specification conformance: [4.11](#411-mcp-specification-conformance). The original review that started this work is archived at
+the known open item D4) and/or by unit tests (182, `npm test`). MCP specification conformance: [4.11](#411-mcp-specification-conformance). The original review that started this work is archived at
 [archive/2026-10-07-security-review.md](archive/2026-10-07-security-review.md). Architecture and product/platform
 decisions are in [GUIDE.md](GUIDE.md).
 
@@ -241,6 +241,8 @@ Each records what was chosen, what else was considered, and why.
 
 ### 4.11 MCP specification conformance
 
+Security-relevant summary; the full requirement-by-requirement report is [MCP-COMPLIANCE.md](MCP-COMPLIANCE.md).
+
 Evaluated 2026-10-12 against the MCP specification. The server and today's clients (MCP SDK 1.32.1, Inspector) speak
 revision **2025-11-25** (sessions, `initialize`); the current revision is **2026-07-28** (stateless).
 
@@ -290,7 +292,7 @@ revision **2025-11-25** (sessions, `initialize`); the current revision is **2026
 
 | Step | Command | Proves |
 |---|---|---|
-| Unit and in-process attack tests | `npm test` (180) | every control in isolation, incl. multi-device mandate races |
+| Unit and in-process attack tests | `npm test` (182) | every control in isolation, incl. multi-device mandate races |
 | Real client path | `scripts/inspector-smoke.sh` (14) | the gateway path, OAuth challenge, approval link |
 | Full journey | `npm run test:e2e` | login, consent, approval in a headless browser, order |
 | Attack lab | `npx tsx test/attack/lab.ts --report=docs/ATTACK-RESULTS.md` | every persona live; expected: all held except D4 |

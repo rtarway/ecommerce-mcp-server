@@ -1,7 +1,7 @@
 import type { Approval } from "./service.js";
 
 const esc = (s: string | number) =>
-  String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+  String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 const shell = (title: string, body: string) =>

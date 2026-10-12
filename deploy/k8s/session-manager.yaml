@@ -20,7 +20,7 @@ spec:
       - name: session-manager
         image: ecommerce-mcp-server:dev
         imagePullPolicy: IfNotPresent
-        command: ["node", "dist/sm-main.js"]
+        command: ["node", "dist/bin/session-manager.js"]
         ports: [{ name: http, containerPort: 3100 }]
         env:
         - { name: PORT, value: "3100" }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { wwwAuthenticate } from "./challenge.js";
+import { wwwAuthenticate } from "../../../src/auth/challenge.js";
 
 const rm = "http://localhost:8000/.well-known/oauth-protected-resource/mcp";
 

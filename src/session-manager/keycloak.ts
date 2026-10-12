@@ -81,5 +81,6 @@ export async function handleReuseEvent(
     await engine.terminateCustomer(e.userId, "refresh_token_reuse", { azp: e.clientId, sid: e.sessionId });
     return true;
   }
-  return engine.terminateBySession(e.sessionId!, "refresh_token_reuse", { azp: e.clientId });
+  if (!e.sessionId) return false;
+  return engine.terminateBySession(e.sessionId, "refresh_token_reuse", { azp: e.clientId });
 }

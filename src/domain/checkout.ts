@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { deleteOldest } from "../shared/collections.js";
 import type { Cart, CartService } from "./cart.js";
 
 export interface Address {
@@ -161,7 +162,7 @@ export class CheckoutService {
     this.carts.clear(customerKey);
     if (idempotencyKey) {
       this.byIdempotencyKey.set(idempotencyKey, order);
-      if (this.byIdempotencyKey.size > MAX_IDEMPOTENCY_KEYS) this.byIdempotencyKey.delete(this.byIdempotencyKey.keys().next().value!);
+      if (this.byIdempotencyKey.size > MAX_IDEMPOTENCY_KEYS) deleteOldest(this.byIdempotencyKey);
     }
     return { order, replayed: false };
   }

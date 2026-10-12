@@ -8,6 +8,7 @@ which design keeps it safe while staying easy for legitimate shoppers.
 Companion documents:
 - [SECURITY-POSTURE.md](SECURITY-POSTURE.md): trust boundaries, security decisions, every attack vector and what
   stops it, security processes (verification, incident runbooks).
+- [MCP-COMPLIANCE.md](MCP-COMPLIANCE.md): compliance report against the MCP specification (2025-11-25, readiness for 2026-07-28).
 - [ATTACK-RESULTS.md](ATTACK-RESULTS.md): latest run of the attack lab against the live stack.
 - [HARNESSES.md](HARNESSES.md): runbook for testing real agent harnesses (OpenClaw, Hermes Agent) against the shop.
 - `mcp-ecosystem-infra/docs/onboarding.md`: the platform's contract for MCP server teams.
@@ -88,8 +89,8 @@ flowchart LR
 | Component | Role | Code / config |
 |---|---|---|
 | agentgateway | MCP-aware gateway: terminates and pairs MCP sessions, routes `/mcp`, `/approve`, discovery; applies the shop's edge policy | platform; route + policy in `deploy/k8s/gateway-route.yaml`, `gateway-policy.yaml` |
-| Shop MCP server | Tools, OAuth resource-server checks (JWT, scopes, DPoP), server-issued sessions, carts, approvals, orders, mandate, audit log, approval web pages | `src/` (entry `src/main.ts`) |
-| Session-manager | Gateway extAuth: tracks each *installation* `(sub, client, Keycloak session)`, detects token theft, ends sessions | `src/session-manager/` (entry `src/sm-main.ts`), same image |
+| Shop MCP server | Tools, OAuth resource-server checks (JWT, scopes, DPoP), server-issued sessions, carts, approvals, orders, mandate, audit log, approval web pages | `src/` (entry `src/bin/shop.ts`) |
+| Session-manager | Gateway extAuth: tracks each *installation* `(sub, client, Keycloak session)`, detects token theft, ends sessions | `src/session-manager/` (entry `src/bin/session-manager.ts`), same image |
 | Keycloak | Identity provider: login, consent, tokens, dynamic client registration, events | platform realm `mcp`; shop's scopes and clients from `platform/tenant.yaml` |
 | Istio + NetworkPolicy | Only the gateway's identity can reach the shop; mTLS on that hop | platform (`modules/mcp-servers-baseline`) |
 
@@ -282,11 +283,10 @@ Check a certificate: `kubectl -n mcp-servers exec deploy/ecommerce-mcp-server -c
 ### 4.8 Develop
 
 ```bash
-npm ci && npm test        # 180 unit/in-process tests, no network
-npm run typecheck
+npm ci && npm run check   # typecheck + lint + 182 unit/in-process tests, no network
 ```
 
-Configuration is env vars (`src/config.ts`, `src/sm-main.ts`); defaults are the secure ones. Browser clients must be
+Configuration is env vars, validated at start-up (`src/config/shop.ts`, `src/config/session-manager.ts`); defaults are the secure ones. Browser clients must be
 listed in `ALLOWED_ORIGINS` (`deploy/k8s/shop-mcp.yaml`; Inspector's origins today); the shop's route accepts only
 `Host: localhost` and `127.0.0.1`. `DEBUG_REQUESTS=true`
 logs request shapes (header names only). Audit events are JSON lines with `"audit":true` on stdout of both pods.
@@ -369,7 +369,7 @@ floods and theft run last (they rate-limit and reset the lab user for a few minu
 
 ### 5.5 Planned: many clients on many devices
 
-Covered by unit tests today (`src/mcp/server.test.ts`, "spending mandate"): one shared budget across devices;
+Covered by unit tests today (`test/unit/mcp/server.test.ts`, "spending mandate"): one shared budget across devices;
 two carts that each fit but not together (one bought, one sent to approval); two devices checking out the same
 shared cart (one order). The live test should add N separate installations (different `sid`) checking out
 concurrently through the gateway; mandate exhaustion mid-burst; window roll-over; a `cooling_off` installation;

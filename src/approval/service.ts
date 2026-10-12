@@ -57,7 +57,8 @@ export class ApprovalService {
     }
     // A thief spamming checkouts must not be able to crowd out the customer's own request: drop the oldest instead.
     const mine = [...this.approvals.values()].filter((a) => a.subject === subject && a.status === "pending");
-    if (mine.length >= this.maxPerSubject) this.approvals.delete(mine[0]!.id);
+    const oldest = mine[0];
+    if (mine.length >= this.maxPerSubject && oldest) this.approvals.delete(oldest.id);
     if (this.approvals.size >= this.maxLive) throw new ApprovalCapacityError("The shop is busy; please try again shortly");
     const approval: Approval = { id: this.newId(), subject, clientId, cartHash, summary, status: "pending", expiresAt: this.now() + this.opts.ttlMs };
     this.approvals.set(approval.id, approval);
@@ -76,7 +77,7 @@ export class ApprovalService {
   /** Records the customer's decision. Only the customer the approval was issued to can decide. */
   decide(id: string, subject: string, approve: boolean): "ok" | "wrong_user" | "gone" {
     const a = this.get(id);
-    if (!a || a.status !== "pending") return "gone";
+    if (a?.status !== "pending") return "gone";
     if (a.subject !== subject) return "wrong_user";
     a.status = approve ? "approved" : "denied";
     return "ok";

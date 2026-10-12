@@ -2,7 +2,8 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AuditLog } from "../security/audit.js";
 import { messagePage, reviewPage } from "./page.js";
-import type { ApprovalLogin } from "./oidc.js";
+import { deleteOldest } from "../shared/collections.js";
+import type { ApprovalLogin, LoginResult } from "./oidc.js";
 import type { Approval, ApprovalService } from "./service.js";
 
 interface LoginContext {
@@ -101,7 +102,7 @@ export class ApprovalWeb {
 
   private start(res: ServerResponse, approvalId: string) {
     const approval = this.o.approvals.get(approvalId);
-    if (!approval || approval.status !== "pending") {
+    if (approval?.status !== "pending") {
       return this.page(res, 410, messagePage("Link expired", "This approval request has expired or was already handled. Ask your assistant to try checking out again."));
     }
     this.trimLogins();
@@ -120,10 +121,10 @@ export class ApprovalWeb {
       return this.page(res, 400, messagePage("Sign-in failed", "The sign-in could not be completed. Open the approval link again."));
     }
     const approval = this.o.approvals.get(ctx.approvalId);
-    if (!approval || approval.status !== "pending") {
+    if (approval?.status !== "pending") {
       return this.page(res, 410, messagePage("Link expired", "This approval request has expired or was already handled."));
     }
-    let login;
+    let login: LoginResult;
     try {
       login = await this.o.login.complete({ code, verifier: ctx.verifier, nonce: ctx.nonce, redirectUri: this.redirectUri });
     } catch {
@@ -163,7 +164,8 @@ export class ApprovalWeb {
     if (!this.o.placeOrder) {
       return this.page(res, 200, messagePage("Approved", "Thank you. Go back to your assistant and ask it to complete the checkout."), done);
     }
-    const approval = this.o.approvals.get(session.approvalId)!;
+    const approval = this.o.approvals.get(session.approvalId);
+    if (!approval) return this.page(res, 410, messagePage("Link expired", "This approval request has expired or was already handled."), done);
     try {
       const { orderId, totalCents } = this.o.placeOrder(approval);
       this.o.audit.record({ event: "order_placed", sub: session.subject, orderId, totalCents, via: "approval_page" });
@@ -183,7 +185,7 @@ export class ApprovalWeb {
     const t = this.now();
     for (const [k, v] of this.logins) if (v.expires <= t) this.logins.delete(k);
     for (const [k, v] of this.sessions) if (v.expires <= t) this.sessions.delete(k);
-    while (this.logins.size >= MAX_PENDING_LOGINS) this.logins.delete(this.logins.keys().next().value!);
+    while (this.logins.size >= MAX_PENDING_LOGINS) deleteOldest(this.logins);
   }
 }
 

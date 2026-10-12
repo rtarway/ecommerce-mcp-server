@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { buildShop, type Shop } from "../shop.js";
-import { createShopServer, type CheckoutPolicy, type RequestContext } from "./server.js";
-import type { Identity } from "../auth/tokens.js";
-import { placeApprovedOrder } from "../approval/complete.js";
-import { ApprovalService } from "../approval/service.js";
-import { MemoryAudit } from "../security/audit.js";
+import { buildShop, type Shop } from "../../../src/domain/shop.js";
+import { createShopServer, type CheckoutPolicy, type RequestContext } from "../../../src/mcp/server.js";
+import type { Identity } from "../../../src/auth/tokens.js";
+import { placeApprovedOrder } from "../../../src/approval/complete.js";
+import { ApprovalService } from "../../../src/approval/service.js";
+import { MemoryAudit } from "../../../src/security/audit.js";
 
 const customer: Identity = { subject: "c1", username: "testuser", clientId: "agent-a", scopes: ["openid", "ecommerce:checkout"] };
 

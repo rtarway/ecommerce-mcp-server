@@ -21,7 +21,8 @@ export type AuthScheme = "bearer" | "dpop";
 
 export function parseAuthorization(header: string | undefined): { scheme: AuthScheme; token: string } | undefined {
   const match = /^(Bearer|DPoP)\s+(\S+)$/i.exec(header ?? "");
-  return match ? { scheme: match[1]!.toLowerCase() as AuthScheme, token: match[2]! } : undefined;
+  const [, scheme, token] = match ?? [];
+  return scheme && token ? { scheme: scheme.toLowerCase() as AuthScheme, token } : undefined;
 }
 
 export function bearerToken(header: string | undefined): string | undefined {

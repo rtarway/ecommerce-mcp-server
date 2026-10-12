@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { Catalog } from "./catalog.js";
-import { CartLimitError, CartService, NotInCartError, UnknownProductError, InvalidQuantityError } from "./cart.js";
+import { Catalog } from "../../../src/domain/catalog.js";
+import { CartLimitError, CartService, NotInCartError, UnknownProductError, InvalidQuantityError } from "../../../src/domain/cart.js";
 
 const catalog = new Catalog([
   { id: "p1", name: "Shoes", category: "footwear", priceCents: 1000, description: "" },
@@ -125,7 +125,7 @@ describe("CartService bounds (H2)", () => {
   });
 
   it("refuses new anonymous carts at capacity without evicting existing visitors", () => {
-    ["session:1", "session:2", "session:3"].forEach((k) => carts.add(k, "p1", 1));
+    for (const k of ["session:1", "session:2", "session:3"]) carts.add(k, "p1", 1);
     expect(() => carts.add("session:4", "p1", 1)).toThrow(CartLimitError);
     expect(carts.get("session:1").items).toHaveLength(1);
   });

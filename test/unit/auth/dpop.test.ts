@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { generateKeyPair } from "jose";
-import { createDpopClient } from "../../test/support/dpop.js";
-import { DpopError, ProofReplayCache, verifyDpopProof } from "./dpop.js";
+import { createDpopClient } from "../../support/dpop.js";
+import { DpopError, ProofReplayCache, verifyDpopProof } from "../../../src/auth/dpop.js";
 
 const URL_ = "http://localhost:8000/mcp";
 const TOKEN = "access.token.value";

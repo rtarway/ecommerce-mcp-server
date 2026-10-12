@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { generateKeyPair } from "jose";
-import { AUDIENCE, ISSUER, createTestIdp, type TestIdp } from "../../test/support/tokens.js";
-import { InvalidTokenError, bearerToken, createTokenVerifier, parseAuthorization } from "./tokens.js";
+import { AUDIENCE, ISSUER, createTestIdp, type TestIdp } from "../../support/tokens.js";
+import { InvalidTokenError, bearerToken, createTokenVerifier, parseAuthorization } from "../../../src/auth/tokens.js";
 
 describe("bearerToken", () => {
   it("extracts the token from an Authorization header", () => {

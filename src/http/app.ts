@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { ApprovalWeb } from "../approval/web.js";
+import type { ApprovalWeb } from "../approval/web.js";
 import { DpopError, ProofReplayCache, verifyDpopProof } from "../auth/dpop.js";
 import { InvalidTokenError, parseAuthorization, type Identity } from "../auth/tokens.js";
 import { wwwAuthenticate } from "../auth/challenge.js";
@@ -9,7 +9,7 @@ import { CHECKOUT_SCOPE, createShopServer, type CheckoutPolicy } from "../mcp/se
 import { noAudit, type AuditLog } from "../security/audit.js";
 import { RateLimiter } from "../security/ratelimit.js";
 import { SessionCapacityError, SessionRegistry } from "../session/registry.js";
-import type { Shop } from "../shop.js";
+import type { Shop } from "../domain/shop.js";
 
 export interface AppConfig {
   shop: Shop;
@@ -111,7 +111,8 @@ export function createApp(config: AppConfig): Server {
   const sourceOf = (req: IncomingMessage): string => {
     if (trust) {
       const hops = firstHeader(req, "x-forwarded-for")?.split(",").map((h) => h.trim()).filter(Boolean);
-      if (hops?.length) return hops[hops.length - 1]!;
+      const last = hops?.at(-1);
+      if (last) return last;
     }
     return req.socket.remoteAddress ?? "unknown";
   };

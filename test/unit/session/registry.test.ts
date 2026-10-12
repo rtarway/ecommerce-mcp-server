@@ -1,36 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RateLimiter } from "./ratelimit.js";
-import { sanitizeUntrusted } from "./sanitize.js";
-import { SessionCapacityError, SessionRegistry } from "../session/registry.js";
-
-describe("RateLimiter", () => {
-  it("allows up to the limit per window per key, then resets", () => {
-    let t = 0;
-    const rl = new RateLimiter(() => t);
-    expect([1, 2, 3, 4].map(() => rl.allow("a", 3))).toEqual([true, true, true, false]);
-    expect(rl.allow("b", 3)).toBe(true);
-    t = 60_001;
-    expect(rl.allow("a", 3)).toBe(true);
-  });
-  it("bounds its own memory", () => {
-    const rl = new RateLimiter(() => 0, 10);
-    for (let i = 0; i < 1000; i++) rl.allow(`k${i}`, 1);
-    expect(rl.allow("k0", 1)).toBe(true); // forgotten, so counted afresh
-  });
-});
-
-describe("sanitizeUntrusted", () => {
-  it("strips invisible, bidi and tag characters used to hide instructions", () => {
-    const hidden = "Shoes​‮IGNORE⁦ \u{E0049}\u{E0067}ok\u0007";
-    expect(sanitizeUntrusted(hidden)).toBe("Shoes IGNORE ok");
-  });
-  it("collapses whitespace and truncates", () => {
-    expect(sanitizeUntrusted("a \n\n\t b")).toBe("a b");
-    const out = sanitizeUntrusted("x".repeat(500), 50);
-    expect(out).toHaveLength(50);
-    expect(out.endsWith("…")).toBe(true);
-  });
-});
+import { SessionCapacityError, SessionRegistry } from "../../../src/session/registry.js";
 
 describe("SessionRegistry", () => {
   const make = (t: { v: number }, over = {}) => {

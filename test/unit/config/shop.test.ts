@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "./config.js";
+import { loadConfig } from "../../../src/config/shop.js";
 
 const env = {
   ISSUER: "http://localhost:8080/realms/mcp",

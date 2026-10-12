@@ -1,6 +1,6 @@
-import { CartService, type CartLimits } from "./domain/cart.js";
-import { Catalog } from "./domain/catalog.js";
-import { CheckoutService, type SpendLimits, type SpendingMandate } from "./domain/checkout.js";
+import { CartService, type CartLimits } from "./cart.js";
+import { Catalog } from "./catalog.js";
+import { CheckoutService, type SpendLimits, type SpendingMandate } from "./checkout.js";
 import { DEMO_PROFILE, PRODUCTS } from "./seed.js";
 
 export interface Shop {

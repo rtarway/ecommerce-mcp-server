@@ -1,5 +1,6 @@
 import type { Identity } from "../auth/tokens.js";
 import type { AuditLog } from "../security/audit.js";
+import { deleteOldest } from "../shared/collections.js";
 
 /**
  * Decides, per request, whether a token belongs to a believable installation, and runs the "root out the thief"
@@ -224,7 +225,7 @@ export class SessionManager {
   private customer(sub: string): Customer {
     let c = this.customers.get(sub);
     if (!c) {
-      if (this.customers.size >= (this.o.maxCustomers ?? 100_000)) this.customers.delete(this.customers.keys().next().value!);
+      if (this.customers.size >= (this.o.maxCustomers ?? 100_000)) deleteOldest(this.customers);
       c = { installations: new Map(), deniedSids: new Map(), newInstallationTimes: [], terminations: [], elevatedUntil: 0 };
       this.customers.set(sub, c);
     }

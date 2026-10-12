@@ -1,13 +1,13 @@
 # Attack lab results
 
-Generated 2026-10-12T21:01:09.915Z against the live local stack by `test/attack/lab.ts`.
+Generated 2026-10-12T21:22:34.937Z against the live local stack by `test/attack/lab.ts`.
 
 | # | Persona | Attack | Impact if it worked | Result | Evidence |
 |---|---|---|---|---|---|
-| B1 | Legitimate shopper | Full purchase: browse → cart → sign in → approve → order | Shoppers cannot buy, or need too many steps | ✅ held | order ord_0f9e0c3edfc032e965 placed in 0.3s; customer actions: 1 sign-in + 1 click (the click places the order; list_orders shows it); retry returned same order (no double charge); total $89.99 |
+| B1 | Legitimate shopper | Full purchase: browse → cart → sign in → approve → order | Shoppers cannot buy, or need too many steps | ✅ held | order ord_9783dabecf66833ac3 placed in 0.3s; customer actions: 1 sign-in + 1 click (the click places the order; list_orders shows it); retry returned same order (no double charge); total $89.99 |
 | B2 | Legitimate shopper | Customer declines on the approval page | A refusal is ignored or the agent keeps nagging | ✅ held | agent told the customer declined; no order |
 | B3 | Legitimate shopper | Second client for the same customer (another install, another session) | A normal second device is treated as an attack | ✅ held | two simultaneous installations both work |
-| B4 | Legitimate shopper | Spots an item they did not ask for (added by a thief or a rogue agent) and removes it before approving | Customer has to approve the injected item or abandon the purchase | ✅ held | view_cart showed the injected watch; removed; order ord_a13dc9de60265c365f contains only bottle-001 ($24.99) |
+| B4 | Legitimate shopper | Spots an item they did not ask for (added by a thief or a rogue agent) and removes it before approving | Customer has to approve the injected item or abandon the purchase | ✅ held | view_cart showed the injected watch; removed; order ord_88b8a80e97e95de857 contains only bottle-001 ($24.99) |
 | A1 | Anonymous bot | Forged / guessed Mcp-Session-Id | Read or modify another visitor's cart | ✅ held | rejected with HTTP 400 |
 | A2 | Anonymous bot | Spoofed trust headers (X-Forwarded-For, x-trust-tier, x-mcp-session-id, x-installation-id) | Forge client identity / bypass cooling-off / hijack a session through the edge | ✅ held | spoofed headers were stripped; the cart stayed on our own session (qty 2 = both calls landed on one cart) |
 | A3 | Anonymous bot | Oversized request body | Memory exhaustion | ✅ held | HTTP 400 |
@@ -26,7 +26,7 @@ Generated 2026-10-12T21:01:09.915Z against the live local stack by `test/attack/
 | D5 | Rogue client | Resource-owner password grant against Keycloak with the customer's password | Client collects passwords directly | ✅ held | HTTP 400 |
 | E1 | Malicious website | Forged/cross-site POST to the approval decision endpoint | Approve a purchase via CSRF | ✅ held | cross-origin and cookie-less posts both 403 |
 | E2 | Malicious website | Clickjacking: frame the approval page | User tricked into clicking Approve | ✅ held | X-Frame-Options: DENY + CSP frame-ancestors 'none' |
-| F1 | In-cluster attacker | Bypass the gateway from a pod in another namespace (forged session + client address) | Unauthenticated access to the shop and forged client identity | ✅ held | shop=000 sm=000 |
+| F1 | In-cluster attacker | Bypass the gateway from a pod in another namespace (forged session + client address) | Unauthenticated access to the shop and forged client identity | ✅ held | shop=000 sm=000 (re-run after fixing the probe's output capture; first run lost the shop half of the output) |
 | G1 | Anonymous bot | Session flood: 150 initialize calls in a burst | Memory exhaustion / denial of service for real shoppers | ✅ held | 18 accepted, 132 rate-limited (429) |
-| H1 | Token thief | Stolen REFRESH token replayed after the real client rotated it | Attacker keeps the customer's session alive indefinitely | ✅ held | before: HTTP 429; thief's replay rejected by Keycloak; within ≤60s the session-manager ended the customer's sessions (access token → 401, legit refresh → 400); only a fresh login gets back in |
+| H1 | Token thief | Stolen REFRESH token replayed after the real client rotated it | Attacker keeps the customer's session alive indefinitely | ✅ held | before: HTTP 200; thief's replay rejected by Keycloak; within ≤60s the session-manager ended the customer's sessions (access token → 401, legit refresh → 400); only a fresh login gets back in |
 | H2 | Legitimate shopper | After a theft reset the real customer signs in again | Recovery locks the real customer out | ✅ held | sign-in works again; browsing OK; checkout proceeds to approval |

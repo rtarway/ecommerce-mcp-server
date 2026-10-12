@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Catalog, type Product } from "./catalog.js";
+import { Catalog, type Product } from "../../../src/domain/catalog.js";
 
 const products: Product[] = [
   { id: "p1", name: "Trail Running Shoes", category: "footwear", priceCents: 8999, description: "Lightweight trail shoes" },

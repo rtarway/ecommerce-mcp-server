@@ -1,5 +1,5 @@
 import type { Order } from "../domain/checkout.js";
-import type { Shop } from "../shop.js";
+import type { Shop } from "../domain/shop.js";
 import type { Approval, ApprovalService } from "./service.js";
 
 /**

@@ -1,29 +1,13 @@
+/** Session-manager process: gateway extAuth, theft detection and response. Wires config to components. */
 import { createRemoteJWKSet } from "jose";
-import { z } from "zod";
-import { createTokenVerifier } from "./auth/tokens.js";
-import { stdoutAudit } from "./security/audit.js";
-import { createSessionManagerApp } from "./session-manager/app.js";
-import { SessionManager } from "./session-manager/engine.js";
-import { KeycloakAdminClient, handleReuseEvent } from "./session-manager/keycloak.js";
+import { createTokenVerifier } from "../auth/tokens.js";
+import { loadSessionManagerConfig } from "../config/session-manager.js";
+import { stdoutAudit } from "../security/audit.js";
+import { createSessionManagerApp } from "../session-manager/app.js";
+import { SessionManager } from "../session-manager/engine.js";
+import { KeycloakAdminClient, handleReuseEvent } from "../session-manager/keycloak.js";
 
-const env = z
-  .object({
-    PORT: z.coerce.number().int().default(3100),
-    ISSUER: z.url(),
-    JWKS_URL: z.url(),
-    RESOURCE_URL: z.url(),
-    KEYCLOAK_URL: z.url(),
-    KEYCLOAK_REALM: z.string().default("mcp"),
-    SM_CLIENT_ID: z.string().default("session-manager"),
-    SM_CLIENT_SECRET: z.string().min(16),
-    ADMIN_TOKEN: z.string().min(24),
-    COOLING_OFF_SECONDS: z.coerce.number().int().min(0).default(0),
-    INCIDENT_WINDOW_SECONDS: z.coerce.number().int().min(0).default(900),
-    DISJOINT_NETWORK_WINDOW_SECONDS: z.coerce.number().int().positive().default(120),
-    MAX_NEW_INSTALLATIONS_PER_HOUR: z.coerce.number().int().positive().default(10),
-    EVENT_POLL_SECONDS: z.coerce.number().int().min(0).default(10),
-  })
-  .parse(process.env);
+const env = loadSessionManagerConfig(process.env);
 
 const admin = new KeycloakAdminClient({ baseUrl: env.KEYCLOAK_URL, realm: env.KEYCLOAK_REALM, clientId: env.SM_CLIENT_ID, clientSecret: env.SM_CLIENT_SECRET });
 const engine = new SessionManager({
@@ -41,7 +25,7 @@ const app = createSessionManagerApp({
   engine,
   verify: createTokenVerifier({ issuer: env.ISSUER, audience: env.RESOURCE_URL, keySet: createRemoteJWKSet(new URL(env.JWKS_URL)) }),
   adminToken: env.ADMIN_TOKEN,
-  resourceMetadataUrl: `${new URL(env.RESOURCE_URL).origin}/.well-known/oauth-protected-resource${new URL(env.RESOURCE_URL).pathname}`,
+  resourceMetadataUrl: env.resourceMetadataUrl,
 });
 app.listen(env.PORT, () => console.log(`session-manager listening on :${env.PORT}`));
 

@@ -15,7 +15,8 @@ if (!password) {
 
 const prmUrl = new URL(`/.well-known/oauth-protected-resource${new URL(MCP_URL).pathname}`, MCP_URL);
 const prm = (await (await fetch(prmUrl)).json()) as { authorization_servers: string[]; scopes_supported: string[] };
-const issuer = prm.authorization_servers[0]!;
+const issuer = prm.authorization_servers[0];
+if (!issuer) throw new Error(`no authorization server in ${prmUrl}`);
 const meta = (await (await fetch(`${issuer}/.well-known/openid-configuration`)).json()) as {
   authorization_endpoint: string;
   token_endpoint: string;
@@ -33,5 +34,5 @@ const { accessToken, consentShown } = await loginWithPkce({
   password,
 });
 if (consentShown) console.error("(consent screen was shown and accepted)");
-if (process.argv.includes("--sub")) console.log(JSON.parse(Buffer.from(accessToken.split(".")[1]!, "base64url").toString()).sub);
+if (process.argv.includes("--sub")) console.log(JSON.parse(Buffer.from(accessToken.split(".")[1] ?? "", "base64url").toString()).sub);
 else console.log(accessToken);

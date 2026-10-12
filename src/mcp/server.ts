@@ -8,7 +8,7 @@ import type { Product } from "../domain/catalog.js";
 import { MandateExceededError, cartHash, type Order } from "../domain/checkout.js";
 import { noAudit, type AuditLog } from "../security/audit.js";
 import { UNTRUSTED_NOTICE, sanitizeUntrusted } from "../security/sanitize.js";
-import type { Shop } from "../shop.js";
+import type { Shop } from "../domain/shop.js";
 
 export const CHECKOUT_SCOPE = "ecommerce:checkout";
 
@@ -191,7 +191,7 @@ export function createShopServer(shop: Shop, ctx: RequestContext, policy: Checko
     },
     guarded(() => {
       const { identity } = ctx;
-      if (!identity || !identity.scopes.includes(CHECKOUT_SCOPE)) {
+      if (!identity?.scopes.includes(CHECKOUT_SCOPE)) {
         throw new Error(`Not authorized: customer sign-in with the ${CHECKOUT_SCOPE} scope is required.`);
       }
       const customerKey = `customer:${identity.subject}`;
@@ -297,7 +297,7 @@ export function createShopServer(shop: Shop, ctx: RequestContext, policy: Checko
     },
     guarded(({ orderId, limit }) => {
       const { identity } = ctx;
-      if (!identity || !identity.scopes.includes(CHECKOUT_SCOPE)) {
+      if (!identity?.scopes.includes(CHECKOUT_SCOPE)) {
         throw new Error(`Not authorized: customer sign-in with the ${CHECKOUT_SCOPE} scope is required.`);
       }
       const all = [...shop.checkout.ordersFor(`customer:${identity.subject}`)].reverse();
@@ -307,7 +307,7 @@ export function createShopServer(shop: Shop, ctx: RequestContext, policy: Checko
         return ok(`Order ${order.orderId} is placed: $${(order.totalCents / 100).toFixed(2)}.`, { order: orderView(order) });
       }
       const orders = all.slice(0, limit ?? 5).map(orderView);
-      return ok(orders.length ? `${orders.length} recent order(s); newest: ${orders[0]!.orderId}.` : "No orders yet.", { orders });
+      return ok(orders.length ? `${orders.length} recent order(s); newest: ${orders[0]?.orderId}.` : "No orders yet.", { orders });
     }),
   );
 

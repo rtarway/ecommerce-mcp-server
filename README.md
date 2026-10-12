@@ -33,22 +33,48 @@ MCP client against the live stack.
 
 Docs: [GUIDE.md](docs/GUIDE.md) (setup, architecture, Inspector walkthrough, troubleshooting),
 [SECURITY-POSTURE.md](docs/SECURITY-POSTURE.md) (attack vectors and mitigations),
+[MCP-COMPLIANCE.md](docs/MCP-COMPLIANCE.md) (compliance with the MCP specification),
 [ATTACK-RESULTS.md](docs/ATTACK-RESULTS.md) (latest lab run). The original review is in [docs/archive](docs/archive).
 
 ## Develop
 
 ```bash
 npm ci
-npm test               # 173 unit + in-process HTTP/MCP tests (no network, no Keycloak)
+npm run check          # typecheck + lint (Biome) + 182 unit/in-process tests; what CI runs, plus the build
 npm run test:coverage
-npm run typecheck
-npm run dev            # needs ISSUER, JWKS_URL, RESOURCE_URL, PUBLIC_BASE_URL (or REQUIRE_APPROVAL=false); see src/config.ts
+npm run dev            # needs ISSUER, JWKS_URL, RESOURCE_URL, PUBLIC_BASE_URL (or REQUIRE_APPROVAL=false); see src/config/shop.ts
+npm run build          # dist/bin/shop.js, dist/bin/session-manager.js
 ```
 
-Layout: `src/domain` (catalog, cart, checkout with caps and idempotency) → `src/mcp` (tools) → `src/http` (gate:
-sessions, rate limits, tokens, DPoP, step-up; transport) · `src/approval` (approval service, OIDC login, pages) ·
-`src/auth` (JWT, DPoP, challenges) · `src/security` (rate limiter, sanitiser, audit) · `src/session` (session
-registry) · `src/session-manager` + `src/sm-main.ts` (session-manager service).
+### Project structure
+
+```
+src/                      production code only (compiled to dist/)
+  bin/                    process entry points: shop.ts, session-manager.ts (wiring only)
+  config/                 environment schemas: shop.ts, session-manager.ts
+  domain/                 catalog, cart, checkout (caps, idempotency, mandate), seed data, shop composition
+  mcp/                    MCP tools (server.ts)
+  http/                   HTTP gate: Origin, rate limits, sessions, tokens, DPoP, step-up; transport
+  approval/               purchase approval: service, OIDC login, web pages, placing approved orders
+  auth/                   JWT verification, DPoP, OAuth challenges
+  security/               rate limiter, untrusted-text sanitiser, audit log
+  session/                MCP session registry (server-issued, bound to their customer)
+  session-manager/        theft detection: installation engine, Keycloak admin/events, extAuth HTTP app
+  shared/                 small generic helpers
+test/
+  unit/                   unit + in-process tests, mirroring src/ (vitest.config.ts)
+  e2e/                    full journey against the live stack (vitest.e2e.config.ts)
+  attack/                 attack lab against the live stack (npm run test:attack)
+  support/                test doubles and fixtures (test IdP, DPoP client, fakes)
+scripts/                  smoke test, token helper
+deploy/k8s/               shop + session-manager manifests, gateway route and edge policy
+platform/tenant.yaml      what this server needs from the MCP platform
+docs/                     guide, security posture, MCP compliance, attack results, harness runbook
+```
+
+Conventions: ES modules with explicit `.js` import suffixes (NodeNext), strict TypeScript, configuration validated
+with zod at start-up (fail fast, secure defaults), no `!` non-null assertions in production code, one test file per
+source module.
 
 ## Deploy (on the mcp-ecosystem-infra platform)
 

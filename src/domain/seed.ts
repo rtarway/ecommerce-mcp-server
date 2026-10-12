@@ -1,5 +1,5 @@
-import type { Product } from "./domain/catalog.js";
-import type { CustomerProfile } from "./domain/checkout.js";
+import type { Product } from "./catalog.js";
+import type { CustomerProfile } from "./checkout.js";
 
 export const PRODUCTS: Product[] = [
   { id: "shoe-trail-001", name: "Trail Running Shoes", category: "footwear", priceCents: 8999, description: "Lightweight trail running shoes with aggressive grip" },

@@ -350,9 +350,18 @@ const scenarios: Scenario[] = [
     id: "F1", persona: "In-cluster attacker", vector: "Bypass the gateway from a pod in another namespace (forged session + client address)",
     impact: "Unauthenticated access to the shop and forged client identity",
     async run() {
-      const out = kubectl(["run", `lab-probe-${Date.now() % 100000}`, "--rm", "-i", "--restart=Never", "--image=curlimages/curl:8.11.1", "-q", "--command", "--", "sh", "-c",
+      // Run the probe pod to completion and read its logs: `kubectl run -i` can miss the output of a short-lived pod.
+      const pod = `lab-probe-${Date.now() % 100000}`;
+      kubectl(["run", pod, "--restart=Never", "--image=curlimages/curl:8.11.1", "--command", "--", "sh", "-c",
         `curl -s -m 6 -o /dev/null -w "shop=%{http_code} " -X POST http://ecommerce-mcp-server.mcp-servers.svc.cluster.local/mcp -H 'Content-Type: application/json' -H 'x-forwarded-for: 1.2.3.4' -H 'mcp-session-id: victim' -d '{}'; ` +
         `curl -s -m 6 -o /dev/null -w "sm=%{http_code}" http://session-manager.mcp-servers.svc.cluster.local/check; true`]);
+      let out = "";
+      try {
+        kubectl(["wait", "--for=jsonpath={.status.phase}=Succeeded", `pod/${pod}`, "--timeout=90s"]);
+        out = kubectl(["logs", pod]);
+      } finally {
+        kubectl(["delete", "pod", pod, "--now"]);
+      }
       return /shop=000/.test(out) && /sm=000/.test(out) ? held(out.trim()) : breach(out.trim());
     },
   },

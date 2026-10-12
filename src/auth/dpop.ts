@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { EmbeddedJWK, calculateJwkThumbprint, jwtVerify } from "jose";
+import { EmbeddedJWK, calculateJwkThumbprint, jwtVerify, type JWTHeaderParameters, type JWTPayload } from "jose";
+import { deleteOldest } from "../shared/collections.js";
 
 export class DpopError extends Error {}
 
@@ -17,7 +18,7 @@ export class ProofReplayCache {
     }
     if (this.seen.has(jti)) return false;
     this.seen.set(jti, t + ttlMs);
-    if (this.seen.size > this.max) this.seen.delete(this.seen.keys().next().value!);
+    if (this.seen.size > this.max) deleteOldest(this.seen);
     return true;
   }
 }
@@ -39,8 +40,8 @@ const WINDOW_SECONDS = 120;
 /** Verifies a DPoP proof JWT against the access token it accompanies (RFC 9449 §4.3). */
 export async function verifyDpopProof({ proof, method, url, accessToken, expectedJkt, cache, now = Date.now }: DpopCheck): Promise<void> {
   if (!proof) throw new DpopError("missing DPoP proof");
-  let payload;
-  let header;
+  let payload: JWTPayload;
+  let header: JWTHeaderParameters;
   try {
     const verified = await jwtVerify(proof, EmbeddedJWK, { typ: "dpop+jwt", algorithms: ["ES256", "ES384", "ES512", "PS256", "RS256", "EdDSA"], currentDate: new Date(now()) });
     payload = verified.payload;

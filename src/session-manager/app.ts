@@ -81,7 +81,7 @@ export function createSessionManagerApp({ engine, verify, adminToken, resourceMe
       }
       const m = /^\/v1\/customers\/([^/]+)(\/terminate)?$/.exec(path);
       if (m) {
-        const sub = decodeURIComponent(m[1]!);
+        const sub = decodeURIComponent(m[1] ?? "");
         if (req.method === "POST" && m[2]) {
           await engine.terminateCustomer(sub, "operator_request");
           return send(res, 202, { terminated: sub });

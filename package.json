@@ -8,14 +8,19 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/main.js",
-    "dev": "tsx watch src/main.ts",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "start": "node dist/bin/shop.js",
+    "start:session-manager": "node dist/bin/session-manager.js",
+    "dev": "tsx watch src/bin/shop.ts",
     "typecheck": "tsc --noEmit",
+    "lint": "biome lint .",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:attack": "tsx test/attack/lab.ts",
+    "check": "npm run typecheck && npm run lint && npm test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
@@ -23,6 +28,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.15",
     "@types/node": "^26.6.4",
     "@vitest/coverage-v8": "^5.0.3",
     "tsx": "^4.23.15",

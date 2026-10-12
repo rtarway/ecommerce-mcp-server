@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { Catalog } from "./catalog.js";
-import { CartService } from "./cart.js";
-import { CheckoutService, EmptyCartError, MandateExceededError, NoProfileError, SpendLimitError, cartHash, type CustomerProfile } from "./checkout.js";
+import { Catalog } from "../../../src/domain/catalog.js";
+import { CartService } from "../../../src/domain/cart.js";
+import { CheckoutService, EmptyCartError, MandateExceededError, NoProfileError, SpendLimitError, cartHash, type CustomerProfile } from "../../../src/domain/checkout.js";
 
 const catalog = new Catalog([
   { id: "p1", name: "Shoes", category: "footwear", priceCents: 1000, description: "" },

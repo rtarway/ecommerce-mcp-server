@@ -136,7 +136,8 @@ describe.runIf(PASSWORD)("shop MCP journey", () => {
     bearer = undefined;
     const restarted = await connect();
     structured(await restarted.callTool({ name: "add_to_cart", arguments: { productId: "bottle-001", quantity: 1 } }));
-    const again = await stepUpLogin("resource_metadata=\"" + new URL("/.well-known/oauth-protected-resource" + new URL(MCP_URL).pathname, MCP_URL).href + "\", scope=\"shop:api ecommerce:checkout\"");
+    const prmUrl = new URL(`/.well-known/oauth-protected-resource${new URL(MCP_URL).pathname}`, MCP_URL).href;
+    const again = await stepUpLogin(`resource_metadata="${prmUrl}", scope="shop:api ecommerce:checkout"`);
     expect(again.consentShown).toBe(false);
     bearer = again.accessToken;
     const pending2 = structured(await restarted.callTool({ name: "one_step_checkout", arguments: {} }));

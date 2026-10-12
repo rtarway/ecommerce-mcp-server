@@ -1,15 +1,16 @@
+/** Shop MCP server process: wires configuration, identity provider keys, shop services and the HTTP app. */
 import { randomUUID } from "node:crypto";
 import { createRemoteJWKSet } from "jose";
-import { placeApprovedOrder } from "./approval/complete.js";
-import { ApprovalService } from "./approval/service.js";
-import { OidcLogin } from "./approval/oidc.js";
-import { ApprovalWeb } from "./approval/web.js";
-import { createTokenVerifier } from "./auth/tokens.js";
-import { loadConfig } from "./config.js";
-import { createApp } from "./http/app.js";
-import { stdoutAudit, noAudit } from "./security/audit.js";
-import { SessionRegistry } from "./session/registry.js";
-import { buildShop } from "./shop.js";
+import { placeApprovedOrder } from "../approval/complete.js";
+import { ApprovalService } from "../approval/service.js";
+import { OidcLogin } from "../approval/oidc.js";
+import { ApprovalWeb } from "../approval/web.js";
+import { createTokenVerifier } from "../auth/tokens.js";
+import { loadConfig } from "../config/shop.js";
+import { createApp } from "../http/app.js";
+import { stdoutAudit, noAudit } from "../security/audit.js";
+import { SessionRegistry } from "../session/registry.js";
+import { buildShop } from "../domain/shop.js";
 
 const config = loadConfig(process.env);
 const audit = config.AUDIT_LOG ? stdoutAudit : noAudit;
@@ -32,8 +33,8 @@ const sessions = new SessionRegistry({
 let checkout = {};
 let approvalWeb: ApprovalWeb | undefined;
 if (config.REQUIRE_APPROVAL) {
-  if (!config.APPROVAL_CLIENT_SECRET) throw new Error("REQUIRE_APPROVAL=true needs APPROVAL_CLIENT_SECRET");
-  const base = config.PUBLIC_BASE_URL!.replace(/\/$/, "");
+  if (!config.APPROVAL_CLIENT_SECRET || !config.PUBLIC_BASE_URL) throw new Error("REQUIRE_APPROVAL=true needs APPROVAL_CLIENT_SECRET and PUBLIC_BASE_URL");
+  const base = config.PUBLIC_BASE_URL.replace(/\/$/, "");
   const approvals = new ApprovalService({ ttlMs: config.APPROVAL_TTL_SECONDS * 1000 });
   const login = new OidcLogin({
     issuer: config.ISSUER,

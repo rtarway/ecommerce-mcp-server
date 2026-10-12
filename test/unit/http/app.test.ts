@@ -3,13 +3,13 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { AUDIENCE, ISSUER, createTestIdp, type TestIdp } from "../../test/support/tokens.js";
-import { createDpopClient } from "../../test/support/dpop.js";
-import { createTokenVerifier } from "../auth/tokens.js";
-import { MemoryAudit } from "../security/audit.js";
-import { SessionRegistry } from "../session/registry.js";
-import { buildShop } from "../shop.js";
-import { createApp, type AppConfig } from "./app.js";
+import { AUDIENCE, ISSUER, createTestIdp, type TestIdp } from "../../support/tokens.js";
+import { createDpopClient } from "../../support/dpop.js";
+import { createTokenVerifier } from "../../../src/auth/tokens.js";
+import { MemoryAudit } from "../../../src/security/audit.js";
+import { SessionRegistry } from "../../../src/session/registry.js";
+import { buildShop } from "../../../src/domain/shop.js";
+import { createApp, type AppConfig } from "../../../src/http/app.js";
 
 const PRM_URL = "http://localhost:8000/.well-known/oauth-protected-resource/mcp";
 
