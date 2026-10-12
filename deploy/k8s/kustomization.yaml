@@ -1,3 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources: [shop-mcp.yaml, gateway-route.yaml]
+# Shop-specific resources only. The namespace security baseline these rely on (default-deny ingress, STRICT mTLS,
+# "only the gateway's identity may call") and the gateway's mesh identity are platform resources managed by
+# mcp-ecosystem-infra (modules/mcp-servers-baseline, modules/agentgateway).
+resources:
+- shop-mcp.yaml
+- session-manager.yaml
+- gateway-route.yaml
+- gateway-policy.yaml   # edge: JWT, rate limit, extAuth -> session-manager, header hygiene

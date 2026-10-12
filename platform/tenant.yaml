@@ -1,0 +1,53 @@
+# What ecommerce-mcp-server needs from the MCP platform (mcp-ecosystem-infra). The platform team registers this file
+# once (terraform/environments/<env>/terraform.tfvars -> tenants); every `terraform apply` then makes the platform
+# match it. This team never holds platform credentials. Contract: mcp-ecosystem-infra/docs/onboarding.md
+apiVersion: platform.mcp.lab/v1alpha1
+kind: McpTenant
+name: ecommerce
+
+# Shared namespace (already secured by the platform). A dedicated one, e.g. `ecommerce`, would be created by the
+# platform with the same baseline: default-deny ingress, STRICT mTLS, only the gateway's identity may call.
+namespace: mcp-servers
+
+gateway:
+  # Path prefixes this server owns on the shared gateway (localhost:8000). The platform refuses overlaps between
+  # tenants. The routes and edge policy themselves live in deploy/k8s (gateway-route.yaml, gateway-policy.yaml).
+  paths:
+  - /mcp
+  - /approve
+  - /.well-known/oauth-protected-resource
+
+idp:
+  # Carries this server's audience: tokens are only valid here if the client asked for this scope (the server's
+  # 401 challenge and protected-resource metadata tell clients to). Never a realm default.
+  resourceScopes:
+  - name: shop:api
+    audience: http://localhost:8000/mcp
+    consentText: Browse the shop and keep a cart as you
+
+  # Consent the customer gives the agent: start purchases (each purchase still needs approval on the shop's page).
+  consentScopes:
+  - name: ecommerce:checkout
+    consentText: Let this app start purchases for you. Every purchase still needs your approval on the shop website
+
+  # The platform's pre-registered test client (mcp-test-client) gets these scopes, for scripts and tests.
+  testClient:
+    defaultScopes: [shop:api]
+    optionalScopes: [ecommerce:checkout]
+
+  clients:
+  # The shop's own login for the purchase-approval page (re-authenticates the customer, prompt=login).
+  - clientId: shop-approval
+    type: web
+    redirectUris: [http://localhost:8000/approve/callback]
+    secretKey: APPROVAL_CLIENT_SECRET
+  # The session-manager's theft response: read Keycloak events, end a customer's sessions, revoke consent.
+  - clientId: session-manager
+    type: service-account
+    realmManagementRoles: [manage-users, view-users, query-users, view-events]
+    secretKey: SM_CLIENT_SECRET
+
+  # Kubernetes Secret the platform writes into the namespace (never printed, never committed).
+  secret:
+    name: shop-secrets
+    generated: [ADMIN_TOKEN]   # random, created once and kept (session-manager operator API token)

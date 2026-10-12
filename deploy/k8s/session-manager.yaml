@@ -1,0 +1,59 @@
+# Session-manager: gateway extAuth + theft playbook (docs/SECURITY-POSTURE.md §3 S9-S12, §4.2). Same image, different entrypoint.
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: session-manager, namespace: mcp-servers }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: session-manager
+  namespace: mcp-servers
+  labels: { app: session-manager }
+spec:
+  replicas: 1 # registry is in memory (POC)
+  selector: { matchLabels: { app: session-manager } }
+  template:
+    metadata: { labels: { app: session-manager } }
+    spec:
+      serviceAccountName: session-manager
+      containers:
+      - name: session-manager
+        image: ecommerce-mcp-server:dev
+        imagePullPolicy: IfNotPresent
+        command: ["node", "dist/sm-main.js"]
+        ports: [{ name: http, containerPort: 3100 }]
+        env:
+        - { name: PORT, value: "3100" }
+        - { name: ISSUER, value: "http://localhost:8080/realms/mcp" }
+        - { name: JWKS_URL, value: "http://keycloak-service.keycloak.svc.cluster.local:8080/realms/mcp/protocol/openid-connect/certs" }
+        - { name: RESOURCE_URL, value: "http://localhost:8000/mcp" }
+        - { name: KEYCLOAK_URL, value: "http://keycloak-service.keycloak.svc.cluster.local:8080" }
+        - { name: KEYCLOAK_REALM, value: "mcp" }
+        - { name: COOLING_OFF_SECONDS, value: "0" }
+        - { name: INCIDENT_WINDOW_SECONDS, value: "900" }
+        - { name: DISJOINT_NETWORK_WINDOW_SECONDS, value: "120" }
+        - { name: MAX_NEW_INSTALLATIONS_PER_HOUR, value: "200" } # lab value (the attack lab signs in ~25x per run); production default is 10
+        - { name: EVENT_POLL_SECONDS, value: "10" }
+        - name: SM_CLIENT_SECRET
+          valueFrom: { secretKeyRef: { name: shop-secrets, key: SM_CLIENT_SECRET } }
+        - name: ADMIN_TOKEN
+          valueFrom: { secretKeyRef: { name: shop-secrets, key: ADMIN_TOKEN } }
+        readinessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 5 }
+        livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 20 }
+        resources:
+          requests: { cpu: 25m, memory: 64Mi }
+          limits: { cpu: 200m, memory: 192Mi }
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: { drop: [ALL] }
+          seccompProfile: { type: RuntimeDefault }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: session-manager, namespace: mcp-servers }
+spec:
+  selector: { app: session-manager }
+  ports: [{ name: http, port: 80, targetPort: http }]

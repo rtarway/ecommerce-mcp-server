@@ -9,7 +9,7 @@ metadata:
   namespace: mcp-servers
   labels: { app: ecommerce-mcp-server }
 spec:
-  replicas: 1 # carts are in-memory (POC); scale out only after moving state to a shared store
+  replicas: 1 # carts/orders are in-memory (POC); scale out only after moving state to a shared store
   selector: { matchLabels: { app: ecommerce-mcp-server } }
   template:
     metadata: { labels: { app: ecommerce-mcp-server } }
@@ -24,10 +24,30 @@ spec:
         - { name: PORT, value: "3000" }
         # Must equal the `iss` claim (what clients see) ...
         - { name: ISSUER, value: "http://localhost:8080/realms/mcp" }
-        # ... but keys are fetched in-cluster.
+        # ... but keys and the approval code exchange go in-cluster.
         - { name: JWKS_URL, value: "http://keycloak-service.keycloak.svc.cluster.local:8080/realms/mcp/protocol/openid-connect/certs" }
+        - { name: TOKEN_URL, value: "http://keycloak-service.keycloak.svc.cluster.local:8080/realms/mcp/protocol/openid-connect/token" }
         - { name: RESOURCE_URL, value: "http://localhost:8000/mcp" }
+        - { name: PUBLIC_BASE_URL, value: "http://localhost:8000" }
+        - { name: API_SCOPE, value: "shop:api" }
+        # Browser origins allowed to call /mcp (MCP Streamable HTTP MUST: validate Origin against DNS rebinding).
+        # MCP Inspector's web UI; requests without an Origin (CLI/desktop agents) are allowed, any other origin gets 403.
+        - { name: ALLOWED_ORIGINS, value: "http://localhost:6274,http://127.0.0.1:6274,http://localhost:6277,http://127.0.0.1:6277" }
         - { name: DEBUG_REQUESTS, value: "false" }
+        # The mesh (STRICT mTLS + AuthorizationPolicy) and NetworkPolicy make the gateway the only caller, so the
+        # gateway's forwarded client address, session id and session-manager verdict can be believed.
+        - { name: TRUST_GATEWAY_HEADERS, value: "true" }
+        - { name: REQUIRE_APPROVAL, value: "true" }
+        - { name: MAX_ORDER_CENTS, value: "50000" }
+        - { name: DAILY_SPEND_CAP_CENTS, value: "100000" }
+        # Spending mandate on testuser's account: agents may spend this much per window without asking (shared by all
+        # of the customer's clients/devices). 0 = every purchase needs the customer's approval.
+        - { name: DEMO_MANDATE_CENTS, value: "0" }
+        - { name: MANDATE_WINDOW_HOURS, value: "24" }
+        # Keycloak id of the demo customer `testuser` (the saved profile belongs to the immutable `sub`, not a name).
+        - { name: DEMO_PROFILE_SUBJECTS, value: "3d3f831b-0b18-41f7-8096-e1243fe4da9b" }
+        - name: APPROVAL_CLIENT_SECRET
+          valueFrom: { secretKeyRef: { name: shop-secrets, key: APPROVAL_CLIENT_SECRET } }
         readinessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 5 }
         livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 20 }
         resources:
@@ -39,10 +59,14 @@ spec:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
           capabilities: { drop: [ALL] }
+          seccompProfile: { type: RuntimeDefault }
 ---
 apiVersion: v1
 kind: Service
-metadata: { name: ecommerce-mcp-server, namespace: mcp-servers }
+metadata:
+  name: ecommerce-mcp-server
+  namespace: mcp-servers
+  labels: { mcp.agentgateway.dev/expose: ecommerce-mcp-server } # value = this server only; "true" would pull in every labelled server
 spec:
   selector: { app: ecommerce-mcp-server }
-  ports: [{ name: http, port: 80, targetPort: http }]
+  ports: [{ name: http, port: 80, targetPort: http, appProtocol: kgateway.dev/mcp }]

@@ -1,6 +1,7 @@
 /**
  * Prints an access token for the demo customer (login + consent handled headlessly, PKCE).
  *   TEST_USER_PASSWORD=… npx tsx scripts/get-token.ts            # token on stdout
+ *   TEST_USER_PASSWORD=… npx tsx scripts/get-token.ts --sub      # the customer's immutable id (`sub`) instead
  * Paste it into Inspector as header `Authorization: Bearer <token>` to act as a signed-in customer.
  */
 import { loginWithPkce } from "../test/e2e/oauth-login.js";
@@ -25,9 +26,12 @@ const { accessToken, consentShown } = await loginWithPkce({
   tokenEndpoint: meta.token_endpoint,
   clientId: process.env.CLIENT_ID ?? "mcp-test-client",
   redirectUri: "http://localhost:53682/callback",
-  scope: `openid ${prm.scopes_supported.join(" ")}`,
+  // The server advertises only its base scope (scope minimisation); a customer token for checkout also needs the
+  // step-up scope, so ask for both up front here.
+  scope: process.env.SCOPE ?? `openid ${[...prm.scopes_supported, "ecommerce:checkout"].join(" ")}`,
   username: process.env.TEST_USER ?? "testuser",
   password,
 });
 if (consentShown) console.error("(consent screen was shown and accepted)");
-console.log(accessToken);
+if (process.argv.includes("--sub")) console.log(JSON.parse(Buffer.from(accessToken.split(".")[1]!, "base64url").toString()).sub);
+else console.log(accessToken);

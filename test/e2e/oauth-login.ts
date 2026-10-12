@@ -14,6 +14,12 @@ export interface LoginParams {
   password: string;
   /** Send this Origin on the token request, as a browser client would; reports the CORS verdict. */
   browserOrigin?: string;
+  /** Extra authorization-request parameters, e.g. prompt/max_age. */
+  authParams?: Record<string, string>;
+  /** Attack lab: send no PKCE challenge, as a sloppy or malicious client would. Default true. */
+  pkce?: boolean;
+  /** Called when Keycloak asks for a one-time code; return the current TOTP. */
+  otp?: (html: string) => Promise<string>;
 }
 
 const decode = (s: string) => s.replace(/&amp;/g, "&");
@@ -62,8 +68,8 @@ export async function loginWithPkce(p: LoginParams) {
     redirect_uri: p.redirectUri,
     scope: p.scope,
     state: "xyz",
-    code_challenge: challenge,
-    code_challenge_method: "S256",
+    ...(p.pkce === false ? {} : { code_challenge: challenge, code_challenge_method: "S256" }),
+    ...p.authParams,
   }).toString();
 
   const loginPage = await get(authUrl.toString());
@@ -103,11 +109,11 @@ export async function loginWithPkce(p: LoginParams) {
       code,
       redirect_uri: p.redirectUri,
       client_id: p.clientId,
-      code_verifier: verifier,
+      ...(p.pkce === false ? {} : { code_verifier: verifier }),
     }),
   });
   if (!tokenRes.ok) throw new Error(`token exchange failed: ${await tokenRes.text()}`);
-  const tokens = (await tokenRes.json()) as { access_token: string; scope: string };
+  const tokens = (await tokenRes.json()) as { access_token: string; refresh_token?: string; id_token?: string; scope: string };
   const tokenCorsOrigin = tokenRes.headers.get("access-control-allow-origin");
-  return { accessToken: tokens.access_token, grantedScope: tokens.scope, consentShown, tokenCorsOrigin };
+  return { accessToken: tokens.access_token, refreshToken: tokens.refresh_token, idToken: tokens.id_token, grantedScope: tokens.scope, consentShown, tokenCorsOrigin };
 }

@@ -1,0 +1,38 @@
+# Edge policy for the shop route (docs/SECURITY-POSTURE.md). The shop re-validates everything it depends on.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: { name: shop-edge, namespace: mcp-servers }
+spec:
+  targetRefs:
+  - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: ecommerce-mcp }
+  traffic:
+    # Permissive, not Strict/Optional: an expired token is the everyday case and the shop answers it with the proper
+    # OAuth challenge (WWW-Authenticate + resource metadata) that makes clients refresh. The edge only attaches
+    # verified claims (for policy/rate limits); the shop validates every token itself.
+    jwtAuthentication:
+      mode: Permissive
+      preserveToken: true # the shop validates the token itself (defense in depth), so it must still receive it
+      providers:
+      - issuer: http://localhost:8080/realms/mcp
+        audiences: ["http://localhost:8000/mcp"]
+        jwks:
+          remote:
+            url: http://keycloak-service.keycloak.svc.cluster.local:8080/realms/mcp/protocol/openid-connect/certs
+    # Per client address. In production the load balancer must preserve the client IP (or use PROXY protocol).
+    rateLimit:
+      local:
+      - { requests: 300, unit: Minutes, burst: 60, key: "source.address" }
+    # Session-manager: refuses revoked token families, tags installations with a trust tier.
+    extAuth:
+      backendRef: { name: session-manager, port: 80 }
+      failureMode: FailOpen # availability for shoppers; the shop itself still enforces tokens, approvals and caps
+      http:
+        path: "'/check'"
+        allowedRequestHeaders: [authorization, dpop, user-agent, mcp-session-id, x-forwarded-for]
+        allowedResponseHeaders: [x-trust-tier, x-installation-id]
+    transformation:
+      request:
+        # Anything the client sends under these names is replaced or dropped: the shop trusts them (only the gateway can reach it).
+        remove: [x-trust-tier, x-installation-id, x-mcp-session-id]
+        set:
+        - { name: x-forwarded-for, value: "source.address" }

@@ -2,11 +2,13 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { loginWithPkce } from "./oauth-login.js";
+import { approveInBrowser, kubectl, sleep } from "../attack/lib.js";
 
 /**
  * Black-box journey against a running deployment (local process or the cluster gateway):
  *   MCP_URL=http://localhost:8000/mcp TEST_USER_PASSWORD=... npm run test:e2e
- * Behaves like a real MCP client: 401 challenge -> discovery -> PKCE login (+ consent) -> retry.
+ * Behaves like a real MCP client: 401 challenge -> discovery -> PKCE login (+ consent) -> retry; and like the
+ * customer: opens the approval link, signs in again, approves.
  */
 const MCP_URL = process.env.MCP_URL ?? "http://localhost:8000/mcp";
 const PASSWORD = process.env.TEST_USER_PASSWORD ?? "";
@@ -69,8 +71,13 @@ const KC_URL = process.env.KC_URL ?? "http://localhost:8080";
 const KC_ADMIN_PASSWORD = process.env.KC_ADMIN_PASSWORD;
 const REALM = process.env.REALM ?? "mcp";
 
-/** Forgets the user's consent for the client so the "first time" path can be exercised repeatably. */
+/**
+ * Forgets the user's consent for the client so the "first time" path can be exercised repeatably. Needs the platform's
+ * Keycloak admin password, which application teams do not have: without it the journey still runs, but the
+ * consent screen may or may not appear depending on earlier runs.
+ */
 async function resetConsent() {
+  if (!KC_ADMIN_PASSWORD) return;
   const tokenRes = await fetch(`${KC_URL}/realms/master/protocol/openid-connect/token`, {
     method: "POST",
     body: new URLSearchParams({ client_id: "admin-cli", grant_type: "password", username: "admin", password: KC_ADMIN_PASSWORD! }),
@@ -80,8 +87,22 @@ async function resetConsent() {
   await fetch(`${KC_URL}/admin/realms/${REALM}/users/${users[0]!.id}/consents/${CLIENT_ID}`, { method: "DELETE", headers });
 }
 
-describe.runIf(PASSWORD && KC_ADMIN_PASSWORD)("shop MCP journey", () => {
-  beforeAll(resetConsent);
+/**
+ * Carts are in memory and a customer's cart lives 24 h, so items left by earlier runs (smoke test, attack lab)
+ * would change totals or hit the spend cap. Against the cluster, start from a clean shop (RESET_SHOP=0 to skip).
+ */
+async function resetShop() {
+  if (process.env.RESET_SHOP === "0") return;
+  kubectl(["-n", "mcp-servers", "rollout", "restart", "deploy/ecommerce-mcp-server"]);
+  kubectl(["-n", "mcp-servers", "rollout", "status", "deploy/ecommerce-mcp-server", "--timeout=120s"]);
+  await sleep(5000);
+}
+
+describe.runIf(PASSWORD)("shop MCP journey", () => {
+  beforeAll(async () => {
+    await resetShop();
+    await resetConsent();
+  }, 180_000);
 
   it("anonymous browse+cart, step-up login with consent, then checkout; later checkouts skip consent", async () => {
     // 1. Anonymous browsing and cart
@@ -93,15 +114,19 @@ describe.runIf(PASSWORD && KC_ADMIN_PASSWORD)("shop MCP journey", () => {
     // 2. Checkout without credentials is refused with a step-up challenge
     await expect(agent.callTool({ name: "one_step_checkout", arguments: {} })).rejects.toThrow();
     expect(lastStatus).toBe(401);
-    expect(lastChallenge).toMatch(/scope="ecommerce:checkout"/);
+    expect(lastChallenge).toMatch(/scope="[^"]*ecommerce:checkout[^"]*"/);
 
     // 3. Customer signs in; first time they must consent to the agent buying for them
     const first = await stepUpLogin(lastChallenge!);
-    expect(first.consentShown).toBe(true);
+    if (KC_ADMIN_PASSWORD) expect(first.consentShown).toBe(true);
     expect(first.grantedScope).toContain("ecommerce:checkout");
     bearer = first.accessToken;
 
-    // 4. Same session, now authenticated: the anonymous cart is claimed and ordered
+    // 4. Same session, now authenticated: the anonymous cart is claimed, but nothing is charged until the
+    //    customer approves on the shop's own page (fresh sign-in there)
+    const pending = structured(await agent.callTool({ name: "one_step_checkout", arguments: {} }));
+    expect(pending.status).toBe("approval_required");
+    expect((await approveInBrowser(pending.approvalUrl)).result).toMatch(/Order ord_\w+ for \$[\d.]+ is placed/);
     const order = structured(await agent.callTool({ name: "one_step_checkout", arguments: {} })).order;
     expect(order.orderId).toMatch(/^ord_/);
     expect(order.total).toBe(89.99);
@@ -111,9 +136,11 @@ describe.runIf(PASSWORD && KC_ADMIN_PASSWORD)("shop MCP journey", () => {
     bearer = undefined;
     const restarted = await connect();
     structured(await restarted.callTool({ name: "add_to_cart", arguments: { productId: "bottle-001", quantity: 1 } }));
-    const again = await stepUpLogin("resource_metadata=\"" + new URL("/.well-known/oauth-protected-resource" + new URL(MCP_URL).pathname, MCP_URL).href + "\", scope=\"ecommerce:checkout\"");
+    const again = await stepUpLogin("resource_metadata=\"" + new URL("/.well-known/oauth-protected-resource" + new URL(MCP_URL).pathname, MCP_URL).href + "\", scope=\"shop:api ecommerce:checkout\"");
     expect(again.consentShown).toBe(false);
     bearer = again.accessToken;
+    const pending2 = structured(await restarted.callTool({ name: "one_step_checkout", arguments: {} }));
+    await approveInBrowser(pending2.approvalUrl);
     const second = structured(await restarted.callTool({ name: "one_step_checkout", arguments: {} })).order;
     expect(second.total).toBe(24.99);
   });

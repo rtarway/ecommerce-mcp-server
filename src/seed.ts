@@ -14,10 +14,8 @@ export const PRODUCTS: Product[] = [
   { id: "light-head-001", name: "Rechargeable Headlamp", category: "electronics", priceCents: 3499, description: "400 lumen USB-C rechargeable headlamp" },
 ];
 
-/** Stand-in for the customer's saved website profile. Keyed by Keycloak username. */
-export const PROFILES: Record<string, CustomerProfile> = {
-  testuser: {
-    shippingAddress: { name: "Test User", line1: "1 Main Street", city: "Springfield", postalCode: "12345", country: "US" },
-    payment: { brand: "visa", last4: "4242" },
-  },
+/** The saved website profile every demo customer shares (stand-in for the real account service). */
+export const DEMO_PROFILE: CustomerProfile = {
+  shippingAddress: { name: "Test User", line1: "1 Main Street", city: "Springfield", postalCode: "12345", country: "US" },
+  payment: { brand: "visa", last4: "4242" },
 };

@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { generateKeyPair } from "jose";
 import { AUDIENCE, ISSUER, createTestIdp, type TestIdp } from "../../test/support/tokens.js";
-import { InvalidTokenError, bearerToken, createTokenVerifier } from "./tokens.js";
+import { InvalidTokenError, bearerToken, createTokenVerifier, parseAuthorization } from "./tokens.js";
 
 describe("bearerToken", () => {
   it("extracts the token from an Authorization header", () => {
@@ -12,6 +12,14 @@ describe("bearerToken", () => {
     expect(bearerToken(undefined)).toBeUndefined();
     expect(bearerToken("Basic abc")).toBeUndefined();
     expect(bearerToken("Bearer ")).toBeUndefined();
+  });
+});
+
+describe("parseAuthorization", () => {
+  it("tells Bearer from DPoP so bound tokens cannot be downgraded", () => {
+    expect(parseAuthorization("DPoP abc")).toEqual({ scheme: "dpop", token: "abc" });
+    expect(parseAuthorization("Bearer abc")).toEqual({ scheme: "bearer", token: "abc" });
+    expect(bearerToken("DPoP abc")).toBeUndefined();
   });
 });
 
@@ -31,6 +39,11 @@ describe("createTokenVerifier", () => {
       clientId: "mcp-test-client",
       scopes: ["openid", "ecommerce:checkout"],
     });
+  });
+
+  it("carries session, freshness and sender-binding claims", async () => {
+    const token = await idp.sign({ sid: "kc-sid", jti: "tok-1", auth_time: 1700000000, cnf: { jkt: "thumb" } });
+    expect(await verify(token)).toMatchObject({ sessionId: "kc-sid", tokenId: "tok-1", authTime: 1700000000, jkt: "thumb" });
   });
 
   it("rejects expired tokens", async () => {

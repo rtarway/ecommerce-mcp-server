@@ -1,7 +1,7 @@
-import { CartService } from "./domain/cart.js";
+import { CartService, type CartLimits } from "./domain/cart.js";
 import { Catalog } from "./domain/catalog.js";
-import { CheckoutService } from "./domain/checkout.js";
-import { PRODUCTS, PROFILES } from "./seed.js";
+import { CheckoutService, type SpendLimits, type SpendingMandate } from "./domain/checkout.js";
+import { DEMO_PROFILE, PRODUCTS } from "./seed.js";
 
 export interface Shop {
   catalog: Catalog;
@@ -9,10 +9,22 @@ export interface Shop {
   checkout: CheckoutService;
 }
 
+export interface ShopOptions {
+  /** Keycloak user ids (`sub`) with a saved profile. */
+  profileSubjects?: readonly string[];
+  cartLimits?: CartLimits;
+  spendLimits?: SpendLimits;
+  /** Spending mandate on the demo customers' accounts (default: none, i.e. every purchase needs approval). */
+  mandate?: SpendingMandate;
+  now?: () => number;
+}
+
 /** Wires the in-memory shop. State lives for the life of the process (POC). */
-export function buildShop(): Shop {
+export function buildShop({ profileSubjects = ["user-123"], cartLimits, spendLimits, mandate, now }: ShopOptions = {}): Shop {
   const catalog = new Catalog(PRODUCTS);
-  const carts = new CartService(catalog);
-  const checkout = new CheckoutService(carts, { find: (username) => PROFILES[username] });
+  const carts = new CartService(catalog, cartLimits, now);
+  const subjects = new Set(profileSubjects);
+  const profile = { ...DEMO_PROFILE, ...(mandate ? { mandate } : {}) };
+  const checkout = new CheckoutService(carts, { find: (sub) => (subjects.has(sub) ? profile : undefined) }, spendLimits, now);
   return { catalog, carts, checkout };
 }

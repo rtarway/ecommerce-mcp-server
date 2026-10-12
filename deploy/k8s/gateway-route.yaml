@@ -1,4 +1,6 @@
 # Exposes the server through the shared agentgateway (installed by the infra repo).
+# The target is selected by label (not a static host) so the gateway uses its mesh identity to reach the pod over
+# mTLS; a static host would be plaintext and is refused under the STRICT mTLS of the platform baseline (mcp-ecosystem-infra modules/mcp-servers-baseline).
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
 metadata: { name: ecommerce-mcp-backend, namespace: mcp-servers }
@@ -7,11 +9,9 @@ spec:
     prefixMode: Never # single target: keep tool names exactly as the server defines them
     targets:
     - name: shop
-      static:
-        host: ecommerce-mcp-server.mcp-servers.svc.cluster.local
-        port: 80
-        protocol: StreamableHTTP
-        path: /mcp
+      selector:
+        namespaces: { matchLabels: { kubernetes.io/metadata.name: mcp-servers } }
+        services: { matchLabels: { mcp.agentgateway.dev/expose: ecommerce-mcp-server } }
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -19,6 +19,8 @@ metadata: { name: ecommerce-mcp, namespace: mcp-servers }
 spec:
   parentRefs:
   - { name: agentgateway-proxy, namespace: agentgateway-system }
+  # Only these Host names reach the shop: a DNS-rebinding page (Host: evil.example) gets 404 at the gateway.
+  hostnames: [localhost, 127.0.0.1]
   rules:
   - matches: [{ path: { type: PathPrefix, value: /mcp } }]
     # Lets browser-based MCP clients (MCP Inspector UI on :6274/:6277) call the endpoint directly.
@@ -33,7 +35,10 @@ spec:
         maxAge: 86400
     backendRefs:
     - { group: agentgateway.dev, kind: AgentgatewayBackend, name: ecommerce-mcp-backend }
-  # OAuth protected-resource metadata is served by the app itself (plain HTTP backend).
-  - matches: [{ path: { type: PathPrefix, value: /.well-known/oauth-protected-resource } }]
+  # OAuth protected-resource metadata and the human purchase-approval pages are served by the app itself
+  # (plain HTTP backend, no MCP session semantics).
+  - matches:
+    - { path: { type: PathPrefix, value: /.well-known/oauth-protected-resource } }
+    - { path: { type: PathPrefix, value: /approve } }
     backendRefs:
     - { name: ecommerce-mcp-server, port: 80 }

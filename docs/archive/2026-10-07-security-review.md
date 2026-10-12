@@ -1,3 +1,9 @@
+> **Archived 2026-10-08.** This is the original security review of the first version (gaps, target
+> architecture, roadmap) plus the implementation-status notes added while building it (section 9).
+> Superseded by [../SECURITY-POSTURE.md](../SECURITY-POSTURE.md), which describes the current posture per
+> attack vector. Kept unchanged as the historical record; file paths and commands below may be out of date
+> (realm-wide Keycloak hardening and the namespace/gateway mesh policies have since moved to `mcp-ecosystem-infra`).
+
 # Security posture, gaps and target architecture
 
 Scope: the e-commerce MCP server as deployed on 2026-10-07 in Rancher Desktop, plus the platform
@@ -260,7 +266,7 @@ sequenceDiagram
   GW->>SM: next request on an invalid session (extAuth)
   SM-->>GW: deny → 404 session not found (client re-initializes) / 401 with login hint max_age=0
   S->>S: ignores stale session ids (registry) even if the gateway is bypassed
-  Note over SM,KC: thief holds tokens but not password/MFA → cannot re-login; customer can
+  Note over SM,KC: thief holds tokens but not password/MFA → cannot re-login, customer can;
 ```
 
 Only the party who can pass login + MFA gets back in. That is the discriminator you asked for: not
@@ -357,3 +363,91 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST localhost:8000/mcp -H 'Content-
 - Keycloak 26 server admin guide: client policies, DPoP, brute force detection, offline sessions, client registration policies.
 - agentgateway 1.6 API: `AgentgatewayPolicy` (`jwtAuthentication`, `rateLimit`, `extAuth`, `extProc`, `authorization`), `AgentgatewayBackend.policies.mcp.authorization`.
 - Istio security: PeerAuthentication, AuthorizationPolicy, SPIRE integration.
+
+---
+
+## 9. Implementation status (2026-10-08)
+
+The target architecture of section 6 was implemented for the local POC and **verified live** with the attack lab
+(`test/attack/lab.ts`, results in [ATTACK-RESULTS.md](ATTACK-RESULTS.md)) plus 145 unit tests. Everything below is
+local-lab infrastructure: it demonstrates the design, it is not a production deployment.
+
+### 9.1 What changed, by gap
+
+| Gap | Status | How / where |
+|---|---|---|
+| **C1** gateway bypass, session forgery | **Closed (2 layers, each tested alone)** | `deploy/k8s/network-policy.yaml` (default-deny, only the gateway pods); `mesh-policy.yaml` (STRICT mTLS + AuthorizationPolicy: only the gateway's SPIFFE identity). Plaintext pod → connection reset; meshed pod with another identity → `RBAC: access denied`. Server also refuses session ids it did not issue (`src/session/registry.ts`). |
+| **H1** no rate limits | **Closed** | Gateway `rateLimit.local` per client address; server per-source request and `initialize` limits; session/cart caps (`gateway-policy.yaml`, `src/security/ratelimit.ts`). Lab: 150-session burst → 129 rate-limited. |
+| **H2** unbounded state | **Closed for carts/sessions/approvals** | TTLs, caps, refuse-new rather than evict-others (`cart.ts`, `registry.ts`, `approval/service.ts`). Orders are still in memory (see 9.3). |
+| **H3** PKCE optional for DCR | **Closed** | Keycloak client policy `public-clients-baseline` (`keycloak-harden.sh`). Lab D2. |
+| **H4** profile keyed by username | **Closed** | Keyed by `sub` (`checkout.ts`, `seed.ts`, `DEMO_PROFILE_SUBJECTS`). |
+| **H5** unbounded offline tokens | **Bounded, not removed** | `offline_access` is not a realm default, but clients that *name* it at registration (Inspector does) are granted it, because refusing breaks legitimate clients (found when Inspector's registration returned 403). Offline tokens are limited to 7 d idle / 30 d hard max, rotated with reuse detection (H7), and cannot spend money alone (H6). Consent still never expires (not built). |
+| **H6** no proof of user presence | **Closed (stronger than planned)** | Every purchase needs the customer to sign in *again* (`prompt=login&max_age=0`) on a server-rendered page showing items, total, card and address. A stolen token or an injected prompt cannot complete it. `auth_time` age check exists but is **off by default** (see 9.2). |
+| **H7** no theft detection / invalidation | **Closed for two signals** | `src/session-manager/`: refresh-token reuse (Keycloak event) and same token family from unrelated networks. Playbook: end Keycloak sessions, revoke consent for affected apps, deny the token families, heightened state. Lab H1/H2 live. |
+| **M1** brute force / password policy | **Partly closed** | Brute-force protection + `length(12)` policy. **MFA is not enforced** (9.3). |
+| **M2** realm-wide audience | **Closed** | `shop:api` is an explicit scope that carries the audience; not a realm default; the shop's challenge asks for it. Lab C4. |
+| **M3** edge validates nothing | **Partly closed** | Edge JWT in `Permissive` mode + extAuth + header hygiene. **No per-tool CEL authorization at the edge** (the server enforces scopes). |
+| **M4** `github.com` trusted for DCR | **Open (accepted for lab)** | Needed for Inspector. Lab D4 shows a look-alike client still registers. Production: no anonymous DCR. |
+| **M5** `client_id` ≠ installation | **Addressed in design** | Installation = `(sub, azp, sid)`. |
+| **M6** no idempotency / spend limit | **Closed** | Idempotent by approval id; per-order and rolling-24h caps. |
+| **M7** prompt injection | **Mitigated** | Sanitised, marked third-party text; server `instructions`; the human approval is the real control. |
+| **M8** PSA `privileged` | **Open** | Needs Istio CNI (platform change). |
+| **M9** plaintext HTTP | **Partly closed** | gateway↔shop is mTLS now; client↔gateway, shop↔Keycloak, Keycloak itself are still HTTP. |
+| **M10** header fallback | **Closed** | Client-supplied headers are ignored unless `TRUST_GATEWAY_HEADERS=true`, which is only safe behind the mesh policy; the edge overwrites/strips them. |
+| **L1** SPIRE | **Open** | Gateway has an Istio-CA SPIFFE identity (`gateway-params.yaml`), not SPIRE. |
+| **L2/L3** state encryption, image digests | **Open** | |
+| **L4** debug clients | **Closed** | Pruned by `keycloak-harden.sh`. |
+
+### 9.2 Things the lab taught us (corrections to the plan above)
+
+1. **"Same `jti` twice" is not a theft signal.** Access tokens are reused for every call until they expire. The useful
+   signal is the same token *family* (`sid`) from unrelated networks.
+2. **A token-age check on checkout is a usability trap.** `max_age` only works if the client forwards it to Keycloak;
+   clients that ignore it loop forever on the 401. The approval page (which forces its own fresh login) gives the
+   guarantee without depending on client behaviour, so `CHECKOUT_MAX_AUTH_AGE_SECONDS` defaults to 0.
+3. **The edge must not reject bad tokens itself.** Its 401 has no OAuth challenge, so clients holding an *expired* token
+   (the everyday case) could not recover. The edge validates in `Permissive` mode and lets the shop answer. Also,
+   `preserveToken: true` is required or the shop never sees the token.
+4. **Keycloak's reuse event carries a session id, not a user id.** The session-manager resolves the customer from `sid`
+   (the same value). Detection that depended on `userId` silently never fired until the live test.
+5. **The gateway sends no client address.** It had to be stamped with an edge transformation (and client-supplied values
+   removed); the shop only sees the sidecar's loopback address otherwise, which would make every per-source limit global.
+   In this lab all clients share one source address (host NAT), so per-IP behaviour can only be proven in unit tests.
+6. **The gateway pairs sessions itself** and passes the *server-issued* `Mcp-Session-Id` upstream, so the server's
+   registry works end to end; the `x-mcp-session-id` header assumed earlier does not exist.
+7. **Hardening can break legitimate clients.** A Keycloak executor with an empty option made *every* dynamic
+   registration fail with HTTP 500; only a "can a normal client still register" test caught it. The lab now includes
+   legitimate-path checks (B1–B3, H2) next to attacks.
+8. **Platform fragility found:** the agentgateway controller's xDS certificate had expired (~24 h after start, not
+   rotated), so any *new* gateway pod failed to start; restarting the controller fixed it, but it will recur. Track in the infra repo.
+9. **A spammer can crowd out a customer's approval quota** unless old requests are dropped first. Fixed.
+
+### 9.3 Not done (and why it matters)
+
+| Item | Why it matters | Next step |
+|---|---|---|
+| **MFA on the approval login** | Password theft alone could still approve a purchase | Authentication flow bound to the `shop-approval` client with OTP/WebAuthn required; the lab's login helper needs a TOTP step. |
+| **DPoP end to end** | Only way to make a stolen *access* token useless before approval time | Server + tests complete (`src/auth/dpop.ts`; bound tokens are rejected as plain Bearer, without a proof, with a wrong-key proof, or with a replayed proof). Not exercised against Keycloak with a real DPoP client, and no common MCP client sends DPoP today. |
+| **CIMD / publisher-verified clients** | The consent-phishing vector (lab D4) | Needs an authorization server or shim that fetches and verifies client metadata documents (SSRF-safe). Not available in Keycloak 26.8 as configured. |
+| **Orders/carts in Postgres** | Restarts lose state; single replica | Repository interfaces exist; swap the in-memory maps. |
+| **Cart merge across sessions, consent expiry, customer notifications** | UX and H5 | The session-manager's notifier is a log line today. |
+| **TLS everywhere, SPIRE, digest pinning, Istio CNI** | Items M8/M9/L1/L3 | Platform work in the infra repo. |
+| **Production semantics of per-client rate limits** | Lab NAT hides client IPs | The load balancer must preserve client addresses (or PROXY protocol). |
+
+### 9.4 Operating it
+
+```bash
+# once per cluster / realm
+KC_ADMIN_PASSWORD=… scripts/keycloak-setup.sh
+KC_ADMIN_PASSWORD=… WRITE_K8S_SECRETS=true PRUNE_DCR_CLIENTS=true scripts/keycloak-harden.sh
+kubectl apply -f deploy/k8s/gateway-params.yaml && kubectl -n agentgateway-system patch gateway agentgateway-proxy --type merge \
+  -p '{"spec":{"infrastructure":{"parametersRef":{"group":"agentgateway.dev","kind":"AgentgatewayParameters","name":"mesh-identity"}}}}'
+docker build -t ecommerce-mcp-server:dev . && kubectl apply -k deploy/k8s
+
+# prove it
+npm test                                                    # 145 unit tests
+TEST_USER_PASSWORD=… npx tsx test/attack/lab.ts --report=docs/ATTACK-RESULTS.md
+```
+
+Lab-only values to change for production: `MAX_NEW_INSTALLATIONS_PER_HOUR` (200 → 10), trusted DCR hosts, in-memory
+state, HTTP everywhere, `DEMO_PROFILE_SUBJECTS`.

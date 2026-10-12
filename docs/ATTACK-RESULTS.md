@@ -1,0 +1,32 @@
+# Attack lab results
+
+Generated 2026-10-12T21:01:09.915Z against the live local stack by `test/attack/lab.ts`.
+
+| # | Persona | Attack | Impact if it worked | Result | Evidence |
+|---|---|---|---|---|---|
+| B1 | Legitimate shopper | Full purchase: browse → cart → sign in → approve → order | Shoppers cannot buy, or need too many steps | ✅ held | order ord_0f9e0c3edfc032e965 placed in 0.3s; customer actions: 1 sign-in + 1 click (the click places the order; list_orders shows it); retry returned same order (no double charge); total $89.99 |
+| B2 | Legitimate shopper | Customer declines on the approval page | A refusal is ignored or the agent keeps nagging | ✅ held | agent told the customer declined; no order |
+| B3 | Legitimate shopper | Second client for the same customer (another install, another session) | A normal second device is treated as an attack | ✅ held | two simultaneous installations both work |
+| B4 | Legitimate shopper | Spots an item they did not ask for (added by a thief or a rogue agent) and removes it before approving | Customer has to approve the injected item or abandon the purchase | ✅ held | view_cart showed the injected watch; removed; order ord_a13dc9de60265c365f contains only bottle-001 ($24.99) |
+| A1 | Anonymous bot | Forged / guessed Mcp-Session-Id | Read or modify another visitor's cart | ✅ held | rejected with HTTP 400 |
+| A2 | Anonymous bot | Spoofed trust headers (X-Forwarded-For, x-trust-tier, x-mcp-session-id, x-installation-id) | Forge client identity / bypass cooling-off / hijack a session through the edge | ✅ held | spoofed headers were stripped; the cart stayed on our own session (qty 2 = both calls landed on one cart) |
+| A3 | Anonymous bot | Oversized request body | Memory exhaustion | ✅ held | HTTP 400 |
+| A4 | Malicious website | Cross-origin browser request to /mcp (preflight and simple request) | A web page rides the user's browser to call the shop | ✅ held | preflight ACAO=none; text/plain simple request → 415 |
+| A5 | Anonymous bot | Invalid / garbage bearer token | Unauthenticated access to tools that need login | ✅ held | 401 with OAuth challenge (client can recover) |
+| A6 | Malicious website | DNS rebinding: a page on another site talks to the local gateway (hostile Host and Origin) | Remote web pages drive the local MCP server through the user's browser | ✅ held | rebound Host → 404 at the gateway (unknown hostname); hostile Origin with a valid Host → 403 at the server |
+| A7 | Token thief | Session hijack: reuse a signed-in customer's MCP session with a different account's token | Read or fill another customer's cart through their session | ✅ held | anonymous use of the victim's session → HTTP 404; victim's cart untouched |
+| C1 | Token thief | Stolen access token (with checkout scope) used to buy | Money moves without the customer | ✅ held | 4 attempts, 0 orders: every call stops at the human approval link |
+| C2 | Token thief | Thief (or injected agent) opens the approval link without the password | Approves the purchase on the customer's behalf | ✅ held | link only leads to Keycloak login; wrong password stops there; still unapproved |
+| C3 | Token thief | Cart tampering after the customer approved (inject extra items before the agent retries) | Customer pays for more than they approved | ✅ held | changed cart needs a fresh approval |
+| C4 | Rogue client | Token minted without the shop audience scope (token for a different resource) | A token meant for another service is accepted here | ✅ held | aud=undefined → 401; challenge tells the client to ask for "shop:api" |
+| D1 | Rogue client | Dynamic registration with a redirect to an attacker's host | Authorization codes delivered to the attacker | ✅ held | registration refused (HTTP 403) |
+| D2 | Rogue client | Registered public client skips PKCE (code interception) | Authorization-code theft by another local app | ✅ held | login refused without PKCE: Error: no <form> in page:  |
+| D3 | Rogue client | Registers naming offline_access (as Inspector and most clients do) to get a long-lived refresh token | Stolen refresh token lives for months | ✅ held | offline token granted (typ Offline) but idle-bounded to 7 d, hard max 30 d; reuse is detected (H1); spending still needs approval (C1) |
+| D4 | Rogue client | Consent phishing: register a look-alike called "MCP Inspector" with Inspector's metadata URL | User consents to an app they believe is a known one | ⚠️ got through | look-alike REGISTERED. Residual risk: DCR cannot verify who is registering. Mitigations that remain: consent + per-purchase approval (money still needs the human); production must disable anonymous DCR / use CIMD with a verified publisher domain |
+| D5 | Rogue client | Resource-owner password grant against Keycloak with the customer's password | Client collects passwords directly | ✅ held | HTTP 400 |
+| E1 | Malicious website | Forged/cross-site POST to the approval decision endpoint | Approve a purchase via CSRF | ✅ held | cross-origin and cookie-less posts both 403 |
+| E2 | Malicious website | Clickjacking: frame the approval page | User tricked into clicking Approve | ✅ held | X-Frame-Options: DENY + CSP frame-ancestors 'none' |
+| F1 | In-cluster attacker | Bypass the gateway from a pod in another namespace (forged session + client address) | Unauthenticated access to the shop and forged client identity | ✅ held | shop=000 sm=000 |
+| G1 | Anonymous bot | Session flood: 150 initialize calls in a burst | Memory exhaustion / denial of service for real shoppers | ✅ held | 18 accepted, 132 rate-limited (429) |
+| H1 | Token thief | Stolen REFRESH token replayed after the real client rotated it | Attacker keeps the customer's session alive indefinitely | ✅ held | before: HTTP 429; thief's replay rejected by Keycloak; within ≤60s the session-manager ended the customer's sessions (access token → 401, legit refresh → 400); only a fresh login gets back in |
+| H2 | Legitimate shopper | After a theft reset the real customer signs in again | Recovery locks the real customer out | ✅ held | sign-in works again; browsing OK; checkout proceeds to approval |
