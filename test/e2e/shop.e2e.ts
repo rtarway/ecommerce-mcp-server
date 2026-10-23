@@ -67,6 +67,7 @@ async function stepUpLogin(challenge: string) {
   });
 }
 
+// Admin API: not on the gateway, reached through the admin port-forward.
 const KC_URL = process.env.KC_URL ?? "http://localhost:8080";
 const KC_ADMIN_PASSWORD = process.env.KC_ADMIN_PASSWORD;
 const REALM = process.env.REALM ?? "mcp";

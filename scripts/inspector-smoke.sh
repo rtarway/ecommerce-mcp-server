@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test of the deployed stack using the MCP Inspector CLI.
 #   TEST_USER_PASSWORD=… scripts/inspector-smoke.sh
-# Needs: gateway on localhost:8000 (Rancher publishes it) and Keycloak port-forwarded on :8080.
+# Needs: gateway on localhost:8000 (Rancher publishes it; sign-in endpoints are on it too).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 

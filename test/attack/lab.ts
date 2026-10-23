@@ -1,5 +1,5 @@
 /**
- * Attack lab: plays every class of MCP client we know of against the LIVE stack (gateway :8000, Keycloak :8080).
+ * Attack lab: plays every class of MCP client we know of against the LIVE stack (gateway :8000, sign-in on the gateway, Keycloak admin :8080).
  *   TEST_USER_PASSWORD=… npx tsx test/attack/lab.ts [--only=A,C] [--report=docs/ATTACK-RESULTS.md] [--no-reset]
  * Restarts the shop first (in-memory state) unless --no-reset.
  * "held" = the defence stopped the attack (or, for the shopper, the journey worked with little friction).

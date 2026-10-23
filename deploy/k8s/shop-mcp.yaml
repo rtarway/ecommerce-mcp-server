@@ -23,7 +23,7 @@ spec:
         env:
         - { name: PORT, value: "3000" }
         # Must equal the `iss` claim (what clients see) ...
-        - { name: ISSUER, value: "http://localhost:8080/realms/mcp" }
+        - { name: ISSUER, value: "http://localhost:8000/realms/mcp" }
         # ... but keys and the approval code exchange go in-cluster.
         - { name: JWKS_URL, value: "http://keycloak-service.keycloak.svc.cluster.local:8080/realms/mcp/protocol/openid-connect/certs" }
         - { name: TOKEN_URL, value: "http://keycloak-service.keycloak.svc.cluster.local:8080/realms/mcp/protocol/openid-connect/token" }

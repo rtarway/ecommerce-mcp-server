@@ -143,7 +143,7 @@ Open items with an owner and a fix: [§9](#9-deviations-and-remediation).
 | 6.2.2 | Metadata discovery (RFC 8414 or OIDC) with `code_challenge_methods_supported` | MUST | ✅ / ⚠️ | OIDC discovery; methods `["plain","S256"]`: `plain` is still advertised (refused for public clients by policy) |
 | 6.2.3 | Client ID Metadata Documents | SHOULD | ❌ | not supported by the platform's Keycloak; dynamic registration (MAY, deprecated in 2026-07-28) is used |
 | 6.2.4 | Short-lived access tokens; rotate refresh tokens for public clients | SHOULD / MUST | ✅ | 5-minute access tokens; rotation with reuse refused (lab H1) |
-| 6.2.5 | All authorization-server endpoints over HTTPS | MUST | ❌ lab | HTTP on `localhost:8080` (lab only) |
+| 6.2.5 | All authorization-server endpoints over HTTPS | MUST | ❌ lab | HTTP on `localhost:8000` via the gateway (lab only) |
 | 6.2.6 | Redirect URIs are localhost or HTTPS | MUST | ✅ | |
 | 6.2.7 | Exact redirect-URI matching | MUST | ⚠️ | dynamically registered clients: exact; the platform's test client uses `http://localhost:*` and `http://127.0.0.1:*` wildcards |
 | 6.2.8 | `iss` in authorization responses (RFC 9207), advertised | SHOULD | ✅ | `authorization_response_iss_parameter_supported: true` |
@@ -201,7 +201,7 @@ and cannot reach money or account data.
 scripts/mcp-compliance-probe.sh                         # protocol, transport, tools, authorization probes (live gateway)
 npm test                                                # unit and in-process tests, incl. attack cases
 TEST_USER_PASSWORD=… npm run test:attack                # live attack lab (A6 Origin, A7 session binding, C4 audience, …)
-curl -s localhost:8080/realms/mcp/.well-known/openid-configuration | python3 -m json.tool   # 6.2.2, 6.2.8
+curl -s localhost:8000/realms/mcp/.well-known/openid-configuration | python3 -m json.tool   # 6.2.2, 6.2.8
 ```
 
 Last probe run: 22 pass, 3 findings (T9 gateway, X4, X5). Server-alone batch check: accepted (finding 1).

@@ -126,6 +126,7 @@ Each records what was chosen, what else was considered, and why.
 | S21 | **Validate `Origin` on the MCP endpoint (allow-list) and restrict the route to known `Host` names** | Rely on CORS only | MCP Streamable HTTP: servers MUST validate `Origin` (DNS rebinding). CORS only stops a browser from *reading* responses; a rebound page is same-origin to the browser. The gateway refuses unknown Hosts (404); the server refuses unknown Origins (403); requests without Origin (non-browser agents) are allowed. |
 | S22 | **Bind MCP sessions to the first customer that uses them** | Session = anonymous cart key only | MCP security best practices: bind session ids (state handles) to the user and never treat possession as authentication. A bound session presented by anyone else, or without the owner's token, is answered like an unknown id. |
 | S23 | **Advertise only the base scope (`shop:api`); `ecommerce:checkout` only via step-up challenge** | List every scope in `scopes_supported` | MCP scope minimisation: a client that authorises before any challenge should not get purchase consent up front. Challenges name exactly what the current operation needs. |
+| S24 | **Sign-in published on the shared gateway, realm `mcp` only** (platform `auth-route`; issuer `http://localhost:8000/realms/mcp`). Not published: master realm, admin console, admin API. Gateway stamps `X-Forwarded-For` and drops client-sent forwarding headers; Keycloak believes them only from pod addresses. Per-address rate limit (600/min) in front of Keycloak | Keycloak on its own origin through a port-forward | Clients may refuse to reach a private authorization server on another origin (OpenClaw, [HARNESSES CC-4](HARNESSES.md#cc-4-openclaw-only-reaches-a-private-network-authorization-server-at-the-mcp-servers-origin)); one front door is the production shape. Trade-off: DCR's sender-address check is off, because behind a load balancer it only sees the balancer; the redirect-URI check (loopback only) stays. Locally every client shares one address (Rancher's ServiceLB rewrites it), so per-address limits and Keycloak events see one client. |
 | S20 | **Approval page headers**: `X-Frame-Options: DENY`, CSP `frame-ancestors 'none'`, `Referrer-Policy: same-origin`, `no-store` | `no-referrer` | Anti-clickjacking and no caching; `same-origin` because `no-referrer` makes browsers send `Origin: null` on the Approve form, which the anti-CSRF origin check refuses. |
 
 ---
@@ -178,11 +179,12 @@ Each records what was chosen, what else was considered, and why.
 
 | Attack | What stops it | Verified | Residual |
 |---|---|---|---|
-| **Redirect codes to an attacker's site** | Trusted-hosts policy: local hosts only (+ `github.com` for client metadata) | D1 | — |
+| **Redirect codes to an attacker's site** | Trusted-hosts policy: every registered URI on a local host (+ `github.com` for client metadata). The sender-address half is off (S24) | D1 | — |
 | **Skip PKCE** | Realm policy: every public client needs PKCE S256; implicit and password grants refused; consent required | D2 | — |
 | **Collect the password** (password grant) | Refused | D5 | — |
 | **Look-alike app** ("MCP Inspector") to phish consent | Consent screen; S1 still protects money | D4: **gets through** | **Open** (S15) |
-| **Register thousands of clients** | Keycloak *Max Clients* (200) | — | No rate limit in front of Keycloak; at the cap legitimate registration fails too |
+| **Register thousands of clients** | Keycloak *Max Clients* (200); gateway rate limit per address (S24) | — | At the cap legitimate registration fails too; locally all clients share one address |
+| **Reach Keycloak's admin surface through the public entry point** | Only `/realms/mcp`, its RFC 8414 metadata path and `/resources/` are routed; `/admin` and `/realms/master` answer 404 at the gateway | manual (curl) | Admin console reachable by port-forward (admin access) |
 
 ### 4.5 Content attacker (prompt injection through product data)
 
@@ -377,7 +379,7 @@ higher caps per customer, a shorter incident window, out-of-band approval on the
 | Client type | How it connects | What it needs from us | Specific risks and controls |
 |---|---|---|---|
 | **Browser-based** (MCP Inspector web UI) | Dynamic registration from `localhost:6274`, PKCE, cross-origin calls | CORS on discovery (any origin, no credentials) and the MCP route (Inspector origins only); registration web-origins; `offline_access` allowed at registration | XSS in the client exposes tokens; approval still required; stored tokens are reused across sessions |
-| **Desktop / CLI agents** (loopback redirect) | Dynamic or pre-registered public client, PKCE | Local trusted hosts; PKCE mandatory | Other local apps can race for the loopback port; PKCE makes a stolen code useless |
+| **Desktop / CLI agents** (loopback redirect) | Dynamic or pre-registered public client, PKCE | Loopback redirect URIs; PKCE mandatory; authorization server on the MCP server's origin (some agents block other private origins: CC-4) | Other local apps can race for the loopback port; PKCE makes a stolen code useless |
 | **Hosted / cloud agents** | Pre-registered or CIMD client; tokens held server-side | Production: CIMD or allowlist; client address preserved at the load balancer | Provider breach = many customers at once; approval and family revocation limit the blast radius; keep mandates small |
 | **Headless / no-browser agents** | Device authorization grant (enabled on `mcp-test-client`) | — | Device-code phishing; the approval page still needs the customer's own login |
 | **Many clients for one customer** | Several installations, one account | One cart and one mandate shared | Each checkout judged against the shared budget; simultaneous checkouts of the same cart buy it once |

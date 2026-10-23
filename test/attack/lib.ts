@@ -2,7 +2,8 @@ import { execFileSync } from "node:child_process";
 import { loginWithPkce } from "../e2e/oauth-login.js";
 
 export const GATEWAY = process.env.GATEWAY_URL ?? "http://localhost:8000";
-export const KEYCLOAK = process.env.KEYCLOAK_URL ?? "http://localhost:8080";
+// Sign-in endpoints are published on the gateway (same origin as the MCP endpoint).
+export const KEYCLOAK = process.env.KEYCLOAK_URL ?? "http://localhost:8000";
 export const REALM_URL = `${KEYCLOAK}/realms/mcp`;
 export const MCP_URL = `${GATEWAY}/mcp`;
 export const USER = process.env.TEST_USER ?? "testuser";

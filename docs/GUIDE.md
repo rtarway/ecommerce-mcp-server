@@ -10,7 +10,8 @@ Companion documents:
   stops it, security processes (verification, incident runbooks).
 - [MCP-COMPLIANCE.md](MCP-COMPLIANCE.md): compliance report against the MCP specification (2025-11-25, readiness for 2026-07-28).
 - [ATTACK-RESULTS.md](ATTACK-RESULTS.md): latest run of the attack lab against the live stack.
-- [HARNESSES.md](HARNESSES.md): runbook for testing real agent harnesses (OpenClaw, Hermes Agent) against the shop.
+- [CLIENT-COMPATIBILITY-REPORT.md](CLIENT-COMPATIBILITY-REPORT.md): shareable summary of client test results and recommended design changes.
+- [HARNESSES.md](HARNESSES.md): real MCP clients (Inspector, Hermes, OpenClaw; next Codex, Claude Code, Gemini CLI, Antigravity) against the shop, and the client compatibility catalogue that feeds the design.
 - `mcp-ecosystem-infra/docs/onboarding.md`: the platform's contract for MCP server teams.
 
 Contents: [1 What it does](#1-what-it-does) · [2 Architecture](#2-architecture) ·
@@ -66,18 +67,19 @@ flowchart LR
   end
   subgraph K8s["Rancher Desktop Kubernetes (platform)"]
     subgraph AG["ns agentgateway-system"]
-      GW["agentgateway :8000<br/>own SPIFFE identity<br/>edge policy from the shop:<br/>header hygiene · rate limit · JWT (permissive) · extAuth"]
+      GW["agentgateway :8000<br/>own SPIFFE identity<br/>/mcp: shop edge policy (header hygiene · rate limit · JWT permissive · extAuth)<br/>/realms/mcp: sign-in route (platform)"]
     end
     subgraph NS["ns mcp-servers · default-deny · STRICT mTLS · only the gateway may call"]
       S["ecommerce-mcp-server<br/>6 tools · approval pages<br/>sessions · carts · orders · mandate (in memory)"]
       SM["session-manager<br/>installations · theft signals · playbook"]
     end
-    KC["Keycloak realm mcp<br/>(localhost:8080 via port-forward)"]
+    KC["Keycloak realm mcp<br/>issuer localhost:8000/realms/mcp (via gateway)<br/>admin console: port-forward :8080 only"]
     IS["istiod (mesh CA) · SPIRE"]
   end
   C -- "MCP (HTTP)" --> GW -- "mTLS" --> S
   GW -- "extAuth (mTLS)" --> SM
-  C -- "OAuth code + PKCE" --> B --> KC
+  C -- "OAuth metadata · DCR · code + PKCE · token (via gateway)" --> GW -- "sign-in route" --> KC
+  B -- "login and consent pages (via gateway)" --> GW
   B -- "approval pages via gateway" --> GW
   S -- "JWKS · approval login code exchange" --> KC
   SM -- "admin API: events, logout, revoke consent" --> KC
@@ -194,6 +196,7 @@ registration stance, theft signals, …) are in [SECURITY-POSTURE.md §3](SECURI
 | D17 | **In-memory state, one replica** | Postgres now | POC speed. Every place that must become transactional with a database is called out (mandate check, idempotency, approvals). |
 | D18 | **Secure defaults in config** (approval required, gateway headers untrusted, DPoP optional) | Permissive defaults | A misconfigured deployment fails closed. `REQUIRE_APPROVAL=false` refuses to start without being explicit. |
 | D20 | **Follow the MCP spec's server-side security rules even where impact is low**: Origin allow-list + route hostnames, sessions bound to their customer, only `shop:api` advertised | Accept low-impact deviations | Spec conformance is what lets clients we do not control behave predictably; each fix was small. Evaluation: [SECURITY-POSTURE.md 4.11](SECURITY-POSTURE.md#411-mcp-specification-conformance). |
+| D21 | **Sign-in on the shared gateway, same origin as the MCP endpoint** (issuer `http://localhost:8000/realms/mcp`; platform module `auth-route`). Only realm `mcp` is routed; master realm, admin console and admin API are not | Keycloak on its own origin (`:8080` port-forward) | Some clients refuse OAuth fetches to a private-network origin other than the MCP server's ([HARNESSES CC-4](HARNESSES.md#cc-4-openclaw-only-reaches-a-private-network-authorization-server-at-the-mcp-servers-origin): OpenClaw). One front door is also the production shape: one TLS endpoint, one place for rate limits and client-address handling. Consequence: DCR's sender-address check is off (behind a load balancer it sees the balancer); redirect URIs must still be loopback. |
 | D19 | **Approval page uses `Referrer-Policy: same-origin`** | `no-referrer` | Under `no-referrer` browsers send `Origin: null` on form posts, which the anti-CSRF origin check correctly refuses: the customer's own click was blocked. `same-origin` sends the real origin and still nothing to other sites. |
 
 ---
@@ -229,7 +232,7 @@ its mesh identity, the `mcp-servers` baseline, and onboards every registered ten
 ### 4.3 Deploy the shop (app team)
 
 ```bash
-kubectl port-forward -n keycloak svc/keycloak-service 8080:8080   # keep running: issuer is http://localhost:8080
+kubectl port-forward -n keycloak svc/keycloak-service 8080:8080   # admin console and admin API only; sign-in is on :8000
 docker build -t ecommerce-mcp-server:dev .                        # Rancher's Docker is shared with k8s: no registry
 kubectl apply -k deploy/k8s                                       # shop, session-manager, backend + route, edge policy
 kubectl -n mcp-servers rollout restart deploy/ecommerce-mcp-server deploy/session-manager   # after rebuilding the image
@@ -247,7 +250,7 @@ TEST_USER_PASSWORD=$(terraform -chdir=$INFRA output -raw test_user_password) npx
 ```bash
 kubectl get pods -A | grep -v kube-system                         # all Running; shop and session-manager 2/2
 curl localhost:8000/.well-known/oauth-protected-resource/mcp      # resource, authorization_servers, scopes_supported
-curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/realms/mcp   # 200
+curl -s -o /dev/null -w '%{http_code}\n' localhost:8000/realms/mcp   # 200: sign-in endpoints on the gateway
 TEST_USER_PASSWORD=… scripts/inspector-smoke.sh                   # 14 PASS
 ```
 
@@ -274,7 +277,7 @@ clock (gateway error `invalid peer certificate: certificate expired`). Recover:
 ```bash
 kubectl -n mcp-servers rollout restart deploy/ecommerce-mcp-server deploy/session-manager
 kubectl -n agentgateway-system rollout restart deploy/agentgateway      # controller xDS certificate, same cause
-kubectl port-forward -n keycloak svc/keycloak-service 8080:8080          # if the port-forward died
+kubectl port-forward -n keycloak svc/keycloak-service 8080:8080          # admin console, if the port-forward died
 ```
 
 Check a certificate: `kubectl -n mcp-servers exec deploy/ecommerce-mcp-server -c istio-proxy -- pilot-agent request GET certs`.
@@ -401,7 +404,8 @@ and, before scaling past one replica, the same burst against a shared database.
 | Inspector CLI `invalid_grant … Offline user session not found` | Stored tokens were revoked (theft playbook, offline limits); Inspector discards them; rerun. |
 | Smoke test "anonymous" checks see a signed-in cart | Stored Inspector tokens; the script uses an empty `HOME` for those checks. |
 | `429` everywhere in the lab | Rate limits (all lab clients share one address). Wait a minute. |
-| `localhost:8080` returns 404 / connection refused | Keycloak port-forward not running, or something else on 8080. |
+| `localhost:8000/realms/mcp` returns 404 | Sign-in route missing: re-apply the platform (`module.auth_route`). |
+| `localhost:8080` returns 404 / connection refused | Admin port-forward not running (needed for the admin console, e2e consent reset and admin scripts only). |
 | First call after rollout times out | Pod warming up; retry after ~15 s. |
 
 ## 7. Known limits

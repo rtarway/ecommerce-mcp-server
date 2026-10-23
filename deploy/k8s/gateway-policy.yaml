@@ -13,7 +13,7 @@ spec:
       mode: Permissive
       preserveToken: true # the shop validates the token itself (defense in depth), so it must still receive it
       providers:
-      - issuer: http://localhost:8080/realms/mcp
+      - issuer: http://localhost:8000/realms/mcp
         audiences: ["http://localhost:8000/mcp"]
         jwks:
           remote:

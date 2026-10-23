@@ -81,7 +81,6 @@ source module.
 ```bash
 # once, platform team: tenants = { ecommerce = "../../ecommerce-mcp-server/platform/tenant.yaml" } in the platform's
 # tfvars, then terraform apply there. It creates the shop's scopes, clients and Secret mcp-servers/shop-secrets.
-kubectl port-forward -n keycloak svc/keycloak-service 8080:8080
 docker build -t ecommerce-mcp-server:dev .
 kubectl apply -k deploy/k8s                                          # shop, session-manager, route, edge policy
 ```

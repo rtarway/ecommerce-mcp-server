@@ -24,7 +24,7 @@ spec:
         ports: [{ name: http, containerPort: 3100 }]
         env:
         - { name: PORT, value: "3100" }
-        - { name: ISSUER, value: "http://localhost:8080/realms/mcp" }
+        - { name: ISSUER, value: "http://localhost:8000/realms/mcp" }
         - { name: JWKS_URL, value: "http://keycloak-service.keycloak.svc.cluster.local:8080/realms/mcp/protocol/openid-connect/certs" }
         - { name: RESOURCE_URL, value: "http://localhost:8000/mcp" }
         - { name: KEYCLOAK_URL, value: "http://keycloak-service.keycloak.svc.cluster.local:8080" }
