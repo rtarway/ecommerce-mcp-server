@@ -47,8 +47,8 @@ export class McpClient {
     return { status: res.status, headers: res.headers, json, text };
   }
 
-  async init() {
-    const r = await this.post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "lab", version: "1" } } });
+  async init(clientName = "lab") {
+    const r = await this.post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: clientName, version: "1" } } });
     this.sessionId = r.headers.get("mcp-session-id") ?? undefined;
     await this.post({ jsonrpc: "2.0", method: "notifications/initialized" });
     return r;
@@ -152,6 +152,15 @@ export async function approveInBrowser(approvalUrl: string, decision: "approve" 
   const origin = /no-referrer/i.test(review.headers.get("referrer-policy") ?? "") ? "null" : GATEWAY;
   const done = await b.fetch(`${GATEWAY}/approve/decision`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin }, body: new URLSearchParams({ csrf, decision }) });
   return { stage: "decided", status: done.status, page: html, result: await done.text() };
+}
+
+/** Keycloak admin API (port-forward, platform credentials). Undefined when KC_ADMIN_PASSWORD is not set. */
+export const KC_ADMIN_URL = process.env.KC_URL ?? "http://localhost:8080";
+export async function adminToken(): Promise<string | undefined> {
+  const password = process.env.KC_ADMIN_PASSWORD;
+  if (!password) return undefined;
+  const res = await fetch(`${KC_ADMIN_URL}/realms/master/protocol/openid-connect/token`, { method: "POST", body: new URLSearchParams({ client_id: "admin-cli", grant_type: "password", username: "admin", password }) });
+  return ((await res.json()) as { access_token: string }).access_token;
 }
 
 /** Runs kubectl in the throw-away probe style; returns stdout. */

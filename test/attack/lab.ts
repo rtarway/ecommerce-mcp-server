@@ -8,7 +8,7 @@
 import { writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import {
-  GATEWAY, KEYCLOAK, MCP_URL, McpClient, PASSWORD, REALM_URL, SHOP_SCOPE, SIGN_IN_FIRST, approveInBrowser, claims, kubectl, login, refresh, sleep,
+  GATEWAY, KC_ADMIN_URL, KEYCLOAK, MCP_URL, McpClient, PASSWORD, REALM_URL, SHOP_SCOPE, SIGN_IN_FIRST, adminToken, approveInBrowser, claims, kubectl, login, refresh, sleep,
   type Outcome, type Scenario,
 } from "./lib.js";
 
@@ -134,6 +134,28 @@ const scenarios: Scenario[] = [
   },
 
   // ───────────────────────── A. anonymous bot / scripted client ─────────────────────────
+  {
+    id: "B5", persona: "Legitimate shopper", vector: "Two of the customer's apps fill one cart; the approval page says which app added what",
+    impact: "Customer approves items one of their agents added without asking",
+    async run() {
+      const redirectUri = "http://127.0.0.1:53710/callback";
+      const reg = await register({ client_name: "Lab second app", redirect_uris: [redirectUri], token_endpoint_auth_method: "none", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], scope: "shop:api ecommerce:checkout" });
+      if (!reg.ok) return breach(`could not register the second app (HTTP ${reg.status})`);
+      const first = new McpClient().withAuth((await login({ scope: SHOP_SCOPE })).accessToken);
+      const second = new McpClient().withAuth((await login({ clientId: reg.client_id, redirectUri, scope: SHOP_SCOPE })).accessToken);
+      await first.init("first-app");
+      await first.clearCart();
+      await second.init("second-app");
+      await first.tool("add_to_cart", { productId: "bottle-001", quantity: 1 });
+      await second.tool("add_to_cart", { productId: "shoe-trail-001", quantity: 1 });
+      const pending = await first.tool("one_step_checkout");
+      if (pending.structured?.status !== "approval_required") return breach(`expected approval_required, got ${pending.text}`);
+      const page = (await approveInBrowser(pending.structured.approvalUrl, "deny")).page;
+      const both = page.includes("added by first-app (client mcp-test") && page.includes(`added by second-app (client ${reg.client_id.slice(0, 8)})`);
+      await first.clearCart();
+      return both ? held("one shared cart; the approval page lists each line with the app that added it (first-app, second-app); customer cancelled, nothing bought") : breach("approval page does not name the app behind each line");
+    },
+  },
   {
     id: "A1", persona: "Anonymous bot", vector: "Forged / guessed Mcp-Session-Id",
     impact: "Read or modify another visitor's cart",
@@ -450,6 +472,23 @@ const scenarios: Scenario[] = [
     },
   },
   {
+    id: "H3", persona: "Racing client", vector: "A client uses one refresh token twice in parallel (a buggy client, or a thief racing the customer)",
+    impact: "Single-use refresh tokens: a race is indistinguishable from theft",
+    async run() {
+      const t = await login({ scope: SHOP_SCOPE });
+      await new McpClient().withAuth(t.accessToken).init(); // a real client uses its token before refreshing it
+      const [a, b] = await Promise.all([refresh("mcp-test-client", t.refreshToken!), refresh("mcp-test-client", t.refreshToken!)]);
+      const ok = [a, b].filter((r) => r.status === 200);
+      if (ok.length !== 1) return breach(`expected exactly one refresh to succeed, got ${a.status}/${b.status}`);
+      let ended = false;
+      for (let i = 0; i < 14 && !ended; i++) {
+        await sleep(5000);
+        ended = (await new McpClient().withAuth(ok[0]!.body.access_token).init()).status === 401;
+      }
+      return held(`one refresh succeeded, the other was refused as reuse (${a.status}/${b.status}); ${ended ? "the session-manager then ended the customer's sessions (theft response): a client that refreshes in parallel signs its customer out everywhere" : "no theft response within 70 s"}`);
+    },
+  },
+  {
     id: "H2", persona: "Legitimate shopper", vector: "After a theft reset the real customer signs in again",
     impact: "Recovery locks the real customer out",
     async run() {
@@ -459,6 +498,24 @@ const scenarios: Scenario[] = [
       const r = await client.tool("one_step_checkout");
       const wait = r.isError && /new|shortly/i.test(r.text ?? "") ? "checkout held back during the incident window (cooling-off)" : r.structured?.status === "approval_required" ? "checkout proceeds to approval" : JSON.stringify(r.structured ?? r.text);
       return init.status === 200 ? held(`sign-in works again; browsing OK; ${wait}`) : breach(`init ${init.status}`);
+    },
+  },
+  {
+    id: "I1", persona: "Retired client", vector: "The platform retires a self-registered client (30-day expiry); the app keeps using its tokens",
+    impact: "Expired apps keep acting for the customer",
+    async run() {
+      const admin = await adminToken();
+      if (!admin) return held("not run: needs KC_ADMIN_PASSWORD (platform credential) to retire a client");
+      const redirectUri = "http://127.0.0.1:53711/callback";
+      const reg = await register({ client_name: "Lab retired app", redirect_uris: [redirectUri], token_endpoint_auth_method: "none", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], scope: "shop:api ecommerce:checkout offline_access" });
+      const t = await login({ clientId: reg.client_id, redirectUri, scope: `${SHOP_SCOPE} offline_access` });
+      const app = new McpClient().withAuth(t.accessToken);
+      if ((await app.init()).status !== 200) return breach("could not connect before retirement");
+      // What the expiry job (mcp-ecosystem-infra modules/client-expiry) does when the client is 30 days old:
+      await fetch(`${KC_ADMIN_URL}/admin/realms/mcp/clients/${reg.client_id}`, { method: "DELETE", headers: { authorization: `Bearer ${admin}` } });
+      const r = await refresh(reg.client_id, t.refreshToken!);
+      const stillConnects = (await new McpClient().withAuth(t.accessToken).init()).status === 200;
+      return r.status >= 400 ? held(`refresh after retirement refused (HTTP ${r.status}); the last access token ${stillConnects ? "still works until it expires (≤ 5 min): retirement takes effect at the next refresh" : "is refused at once"}`) : breach(`refresh still works after retirement (HTTP ${r.status})`);
     },
   },
 ];
