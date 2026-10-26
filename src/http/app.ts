@@ -86,7 +86,15 @@ export const SIGN_IN_NEEDED = "Connect your shop account: sign in to the shop in
 export const SIGN_IN_ENDED = "Your shop sign-in has ended. Sign out of the shop in your app's MCP settings, then sign in again.";
 export const PURCHASE_SCOPE_NEEDED = "Your shop sign-in does not allow purchases yet. Sign in to the shop again in your app's MCP settings and allow purchases.";
 
-const messages = (body: unknown) => (Array.isArray(body) ? body : [body]) as { method?: string; params?: { name?: string } }[];
+const messages = (body: unknown) => (Array.isArray(body) ? body : [body]) as { method?: string; params?: { name?: string; clientInfo?: { name?: unknown } } }[];
+
+/** The app's self-declared name from `initialize`, cleaned for display: printable characters only, short. */
+function declaredClientName(body: unknown): string | undefined {
+  const raw = messages(body).find((m) => m?.method === "initialize")?.params?.clientInfo?.name;
+  if (typeof raw !== "string") return undefined;
+  const clean = raw.replace(/[^\p{L}\p{N} ._-]/gu, "").trim().slice(0, 40);
+  return clean || undefined;
+}
 
 function requiredScopes(body: unknown): string[] {
   return messages(body).flatMap((msg) => {
@@ -221,7 +229,7 @@ export function createApp(config: AppConfig): Server {
         return sendJson(res, 429, { error: "rate_limited" }, { "retry-after": "60" });
       }
       try {
-        sessionId = sessions.issue(source, identity?.subject);
+        sessionId = sessions.issue(source, identity?.subject, declaredClientName(body));
       } catch (err) {
         if (!(err instanceof SessionCapacityError)) throw err;
         audit.record({ event: "session_rejected", source, reason: "capacity" });
@@ -244,7 +252,8 @@ export function createApp(config: AppConfig): Server {
     }
 
     // Stateless transport: one server + transport per request; session state lives in the registry and shop.
-    const mcp = createShopServer(shop, { sessionId, identity, source, trustTier: trust ? firstHeader(req, "x-trust-tier") : undefined }, { ...config.checkout, audit });
+    const clientName = sessionId ? sessions.clientName(sessionId) : undefined;
+    const mcp = createShopServer(shop, { sessionId, identity, source, clientName, trustTier: trust ? firstHeader(req, "x-trust-tier") : undefined }, { ...config.checkout, audit });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on("close", () => {
       void transport.close();

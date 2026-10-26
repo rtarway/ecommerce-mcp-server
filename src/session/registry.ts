@@ -23,6 +23,8 @@ interface Entry {
   lastSeen: number;
   /** Customer (`sub`) the session is bound to, from the first authenticated request that used it. */
   owner?: string;
+  /** The app's self-declared name from `initialize` (clientInfo.name); a label, not verified. */
+  clientName?: string;
 }
 
 /** `foreign`: the session belongs to a different principal (or a signed-in session was used anonymously). */
@@ -38,14 +40,14 @@ export class SessionRegistry {
     this.now = opts.now ?? Date.now;
   }
 
-  issue(source: string, owner?: string): string {
+  issue(source: string, owner?: string, clientName?: string): string {
     this.sweep();
     if (this.sessions.size >= this.opts.maxSessions || (this.perSource.get(source) ?? 0) >= this.opts.maxPerSource) {
       throw new SessionCapacityError();
     }
     const id = this.opts.newId();
     const t = this.now();
-    this.sessions.set(id, { source, created: t, lastSeen: t, owner });
+    this.sessions.set(id, { source, created: t, lastSeen: t, owner, clientName });
     this.perSource.set(source, (this.perSource.get(source) ?? 0) + 1);
     return id;
   }
@@ -72,6 +74,11 @@ export class SessionRegistry {
     if (e.owner === undefined && subject !== undefined) e.owner = subject;
     e.lastSeen = t;
     return "ok";
+  }
+
+  /** The app name the session declared at `initialize`, if any. */
+  clientName(id: string): string | undefined {
+    return this.sessions.get(id)?.clientName;
   }
 
   terminate(id: string): void {

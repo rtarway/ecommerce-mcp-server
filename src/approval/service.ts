@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { Address, PaymentMethod } from "../domain/checkout.js";
 
 export interface ApprovalSummary {
-  items: { productId: string; name: string; quantity: number; unitPriceCents: number }[];
+  items: { productId: string; name: string; quantity: number; unitPriceCents: number; addedBy?: string[] }[];
   totalCents: number;
   payment: PaymentMethod;
   shippingAddress: Address;

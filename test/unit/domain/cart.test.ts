@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Catalog } from "../../../src/domain/catalog.js";
 import { CartLimitError, CartService, NotInCartError, UnknownProductError, InvalidQuantityError } from "../../../src/domain/cart.js";
+import { cartHash } from "../../../src/domain/checkout.js";
 
 const catalog = new Catalog([
   { id: "p1", name: "Shoes", category: "footwear", priceCents: 1000, description: "" },
@@ -147,5 +148,26 @@ describe("CartService bounds (H2)", () => {
     expect(() => c.add("a", "p25", 1)).toThrow(CartLimitError);
     for (let i = 0; i < 5; i++) c.add("a", "p0", 10);
     expect(c.get("a").items[0]?.quantity).toBe(10);
+  });
+
+  it("records which agents added each line; removing the line forgets them; merges keep them", () => {
+    carts.add("customer:c", "p1", 1, "Codex (client 8a1d8381)");
+    carts.add("customer:c", "p1", 1, "claude-code (client ee0ac5bb)");
+    carts.add("customer:c", "p2", 1);
+    const items = carts.get("customer:c").items;
+    expect(items.find((i) => i.productId === "p1")?.addedBy).toEqual(["Codex (client 8a1d8381)", "claude-code (client ee0ac5bb)"]);
+    expect(items.find((i) => i.productId === "p2")?.addedBy).toBeUndefined();
+    carts.remove("customer:c", "p1");
+    carts.add("customer:c", "p1", 1);
+    expect(carts.get("customer:c").items.find((i) => i.productId === "p1")?.addedBy).toBeUndefined();
+    carts.add("session:s", "p2", 1, "Inspector (client mcp-test)");
+    expect(carts.merge(["session:s"], "customer:c").items.find((i) => i.productId === "p2")?.addedBy).toEqual(["Inspector (client mcp-test)"]);
+  });
+
+  it("an approval covers products and quantities, not who added them", () => {
+    carts.add("customer:x", "p1", 1, "app A");
+    const before = cartHash(carts.get("customer:x"));
+    carts.add("customer:y", "p1", 1);
+    expect(cartHash(carts.get("customer:y"))).toBe(before);
   });
 });

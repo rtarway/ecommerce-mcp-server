@@ -19,6 +19,8 @@ export interface RequestContext {
   source?: string;
   /** Verdict from the session-manager (via the gateway): "cooling_off" blocks checkout for a brand-new installation. */
   trustTier?: string;
+  /** The app's self-declared name (MCP clientInfo.name at initialize), used to label cart lines. */
+  clientName?: string;
 }
 
 /** How purchases are authorised. Without `approvals` (dev only) a scoped token alone can spend. */
@@ -37,7 +39,13 @@ const productView = (p: Product) => ({
   description: sanitizeUntrusted(p.description),
 });
 const cartView = (c: Cart) => ({
-  items: c.items.map((i) => ({ productId: i.productId, name: sanitizeUntrusted(i.name, 120), quantity: i.quantity, unitPrice: dollars(i.unitPriceCents) })),
+  items: c.items.map((i) => ({
+    productId: i.productId,
+    name: sanitizeUntrusted(i.name, 120),
+    quantity: i.quantity,
+    unitPrice: dollars(i.unitPriceCents),
+    ...(i.addedBy?.length ? { addedBy: i.addedBy } : {}),
+  })),
   total: dollars(c.totalCents),
 });
 const orderView = (o: Order) => ({
@@ -85,6 +93,13 @@ export function createShopServer(shop: Shop, ctx: RequestContext, policy: Checko
     source: ctx.source,
   });
 
+  /** "<app name> (client <id>)" for a signed-in agent: lets the customer see which of their apps added a line. */
+  const agentLabel = (): string | undefined => {
+    if (!ctx.identity) return undefined;
+    const client = ctx.identity.clientId ? `client ${ctx.identity.clientId.slice(0, 8)}` : "unknown client";
+    return ctx.clientName ? `${ctx.clientName} (${client})` : client;
+  };
+
   const cartKey = (): string => {
     if (ctx.identity) return `customer:${ctx.identity.subject}`;
     if (ctx.sessionId) return `session:${ctx.sessionId}`;
@@ -123,14 +138,14 @@ export function createShopServer(shop: Shop, ctx: RequestContext, policy: Checko
     "add_to_cart",
     {
       title: "Add to cart",
-      description: "Add a product to your cart. No login needed; your cart follows your session.",
+      description: "Add a product to the customer's cart. All of the customer's assistants share one cart; each line records which app added it.",
       inputSchema: {
         productId: z.string().max(100).describe("Product id from product_search"),
         quantity: z.number().int().min(1).max(10).default(1),
       },
     },
     guarded(({ productId, quantity }) => {
-      const cart = cartView(shop.carts.add(cartKey(), productId, quantity));
+      const cart = cartView(shop.carts.add(cartKey(), productId, quantity, agentLabel()));
       return ok(`Cart now has ${cart.items.length} line(s), total $${cart.total.toFixed(2)}.`, { cart });
     }),
   );

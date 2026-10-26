@@ -13,13 +13,16 @@ const shell = (title: string, body: string) =>
 
 export function reviewPage(a: Approval, csrf: string): string {
   const rows = a.summary.items
-    .map((i) => `<tr><td>${esc(i.name)} × ${esc(i.quantity)}</td><td>${money(i.quantity * i.unitPriceCents)}</td></tr>`)
+    .map(
+      (i) =>
+        `<tr><td>${esc(i.name)} × ${esc(i.quantity)}${i.addedBy?.length ? `<br><small class="muted">added by ${esc(i.addedBy.join(", "))}</small>` : ""}</td><td>${money(i.quantity * i.unitPriceCents)}</td></tr>`,
+    )
     .join("");
   const addr = a.summary.shippingAddress;
   return shell(
     "Approve purchase",
     `<h1>Approve this purchase?</h1>
-<p class="muted">An assistant wants to buy the following on your behalf. Nothing is charged unless you approve.</p>
+<p class="muted">An assistant wants to buy the following on your behalf. Nothing is charged unless you approve. Your assistants share one cart: remove anything you did not ask for before approving. App names are as the apps describe themselves.</p>
 <table><tr><th>Item</th><th>Price</th></tr>${rows}<tr class="total"><td>Total</td><td>${money(a.summary.totalCents)}</td></tr></table>
 <p><b>Pay with:</b> ${esc(a.summary.payment.brand)} ending ${esc(a.summary.payment.last4)}<br>
 <b>Ship to:</b> ${esc(addr.name)}, ${esc(addr.line1)}, ${esc(addr.city)} ${esc(addr.postalCode)}, ${esc(addr.country)}</p>

@@ -185,4 +185,21 @@ describe("ApprovalWeb", () => {
     expect((await get("/approve/not-an-id")).status).toBe(404);
     expect((await get(`/approve/${"a".repeat(43)}`)).status).toBe(410);
   });
+
+  it("shows which app added each line, escaped", async () => {
+    const { reviewPage } = await import("../../../src/approval/page.js");
+    const html = reviewPage(
+      {
+        id: "a1", subject: "s", clientId: "c", cartHash: "h", status: "pending", expiresAt: 0,
+        summary: {
+          items: [{ productId: "p", name: "Bottle", quantity: 1, unitPriceCents: 2499, addedBy: ["Codex (client 8a1d8381)", "<b>evil</b>"] }],
+          totalCents: 2499,
+          payment: { brand: "Visa", last4: "4242" },
+          shippingAddress: { name: "T", line1: "1 Main", city: "X", postalCode: "1", country: "US" },
+        },
+      } as never,
+      "csrf",
+    );
+    expect(html).toContain("added by Codex (client 8a1d8381), &lt;b&gt;evil&lt;/b&gt;");
+  });
 });

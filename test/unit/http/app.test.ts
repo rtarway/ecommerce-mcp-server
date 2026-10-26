@@ -169,6 +169,19 @@ describe("Sign in on first connect (REQUIRE_SIGN_IN)", () => {
     expect((await h.rpc(call("list_orders"), headers)).status).toBe(200);
   });
 
+  it("two apps of one customer share the cart, and each line names the app that added it", async () => {
+    const initAs = (name: string) => ({ ...INIT, params: { ...INIT.params, clientInfo: { name, version: "1" } } });
+    const codex = bearer(await idp.sign({ sub: "cust-attr", azp: "8a1d8381-codex", scope: "shop:api ecommerce:checkout" }));
+    const claude = bearer(await idp.sign({ sub: "cust-attr", azp: "ee0ac5bb-claude", scope: "shop:api ecommerce:checkout" }));
+    const s1 = (await h.rpc(initAs("codex-mcp-client"), codex)).headers.get("mcp-session-id")!;
+    const s2 = (await h.rpc(initAs("claude-code<script>"), claude)).headers.get("mcp-session-id")!;
+    await h.rpc(call("add_to_cart", { productId: "bottle-001", quantity: 1 }), { ...codex, "mcp-session-id": s1 });
+    await h.rpc(call("add_to_cart", { productId: "shoe-trail-001", quantity: 1 }), { ...claude, "mcp-session-id": s2 });
+    const view = await resultText(await h.rpc(call("view_cart"), { ...codex, "mcp-session-id": s1 }));
+    expect(view).toContain("codex-mcp-client (client 8a1d8381)");
+    expect(view).toContain("claude-codescript (client ee0ac5bb)"); // self-declared names are cleaned for display
+  });
+
   it("advertises both scopes, so clients ask for everything at the first sign-in", async () => {
     const prm = await (await fetch(`${h.base}/.well-known/oauth-protected-resource/mcp`)).json();
     expect(prm.scopes_supported).toEqual(["shop:api", "ecommerce:checkout"]);

@@ -5,6 +5,11 @@ export interface CartItem {
   name: string;
   quantity: number;
   unitPriceCents: number;
+  /**
+   * Which of the customer's agents added this line (several agents share one customer cart). Labels, not proof:
+   * the app name is self-declared. Not part of what an approval covers (products and quantities are).
+   */
+  addedBy?: string[];
 }
 
 export interface Cart {
@@ -46,6 +51,8 @@ const DEFAULT_LIMITS: CartLimits = { anonymousIdleMs: 2 * 3600_000, customerIdle
 
 interface Stored {
   lines: Map<string, number>;
+  /** productId -> agents that added it. */
+  addedBy: Map<string, Set<string>>;
   touched: number;
 }
 
@@ -71,17 +78,19 @@ export class CartService {
     const items: CartItem[] = [];
     for (const [productId, quantity] of stored?.lines ?? []) {
       const product = this.catalog.get(productId);
-      if (product) items.push({ productId, name: product.name, quantity, unitPriceCents: product.priceCents });
+      const agents = stored?.addedBy.get(productId);
+      if (product) items.push({ productId, name: product.name, quantity, unitPriceCents: product.priceCents, ...(agents?.size ? { addedBy: [...agents].sort() } : {}) });
     }
     return { items, totalCents: items.reduce((sum, i) => sum + i.quantity * i.unitPriceCents, 0) };
   }
 
-  add(key: string, productId: string, quantity: number): Cart {
+  add(key: string, productId: string, quantity: number, addedBy?: string): Cart {
     if (!this.catalog.get(productId)) throw new UnknownProductError(productId);
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_QUANTITY) throw new InvalidQuantityError(quantity);
     const stored = this.live(key) ?? this.create(key);
     if (!stored.lines.has(productId) && stored.lines.size >= MAX_LINES) throw new CartLimitError(`A cart can hold at most ${MAX_LINES} different products`);
     stored.lines.set(productId, Math.min(MAX_QUANTITY, (stored.lines.get(productId) ?? 0) + quantity));
+    if (addedBy) stored.addedBy.set(productId, new Set([...(stored.addedBy.get(productId) ?? []), addedBy]));
     stored.touched = this.now();
     return this.get(key);
   }
@@ -95,7 +104,10 @@ export class CartService {
     const stored = this.live(key);
     const current = stored?.lines.get(productId);
     if (!stored || current === undefined) throw new NotInCartError(productId);
-    if (quantity === undefined || quantity >= current) stored.lines.delete(productId);
+    if (quantity === undefined || quantity >= current) {
+      stored.lines.delete(productId);
+      stored.addedBy.delete(productId);
+    }
     else stored.lines.set(productId, current - quantity);
     stored.touched = this.now();
     return this.get(key);
@@ -110,6 +122,8 @@ export class CartService {
         for (const [productId, quantity] of this.live(source)?.lines ?? []) {
           if (!target.lines.has(productId) && target.lines.size >= MAX_LINES) continue;
           target.lines.set(productId, Math.min(MAX_QUANTITY, (target.lines.get(productId) ?? 0) + quantity));
+          const agents = this.live(source)?.addedBy.get(productId);
+          if (agents?.size) target.addedBy.set(productId, new Set([...(target.addedBy.get(productId) ?? []), ...agents]));
         }
         this.carts.delete(source);
       }
@@ -147,7 +161,7 @@ export class CartService {
       if (victim === undefined) throw new CartLimitError("The shop is busy right now; please try again shortly");
       this.carts.delete(victim);
     }
-    const stored: Stored = { lines: new Map(), touched: this.now() };
+    const stored: Stored = { lines: new Map(), addedBy: new Map(), touched: this.now() };
     this.carts.set(key, stored);
     return stored;
   }
