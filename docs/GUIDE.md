@@ -11,7 +11,8 @@ Companion documents:
 - [MCP-COMPLIANCE.md](MCP-COMPLIANCE.md): compliance report against the MCP specification (2025-11-25, readiness for 2026-07-28).
 - [ATTACK-RESULTS.md](ATTACK-RESULTS.md): latest run of the attack lab against the live stack.
 - [CLIENT-COMPATIBILITY-REPORT.md](CLIENT-COMPATIBILITY-REPORT.md): shareable summary of client test results and recommended design changes.
-- [HARNESSES.md](HARNESSES.md): real MCP clients (Inspector, Hermes, OpenClaw; next Codex, Claude Code, Gemini CLI, Antigravity) against the shop, and the client compatibility catalogue that feeds the design.
+- [HARNESSES.md](HARNESSES.md): real MCP clients (Inspector, Claude Code, Codex, OpenClaw, Hermes) against the shop, and the client compatibility catalogue that feeds the design.
+- [plans/SIGN-IN-ON-CONNECT.md](plans/SIGN-IN-ON-CONNECT.md): the implemented plan (stories S0–S12) for sign-in on first connect.
 - `mcp-ecosystem-infra/docs/onboarding.md`: the platform's contract for MCP server teams.
 
 Contents: [1 What it does](#1-what-it-does) · [2 Architecture](#2-architecture) ·
@@ -22,9 +23,12 @@ Contents: [1 What it does](#1-what-it-does) · [2 Architecture](#2-architecture)
 
 ## 1. What it does
 
-An AI agent (MCP client) can **browse and fill a cart anonymously**, like a website visitor. To **buy**:
+An AI agent (MCP client) **signs the customer in when it first connects** (OAuth, both scopes, one consent per app);
+from then on it can browse, fill the customer's cart and check out without another sign-in. All of the customer's
+agents share one cart; each line names the app that added it. (`REQUIRE_SIGN_IN=false` restores the earlier design:
+anonymous browsing, sign-in and step-up only at checkout.) To **buy**:
 
-1. the customer signs in through the agent (OAuth) and **consents** once per app to the agent purchasing for them;
+1. the agent is already signed in with the purchase scope (consented to at the first sign-in);
 2. for each purchase, unless it fits the customer's **spending mandate** (0 today), the agent hands the customer a
    link; the customer **signs in again on the shop's own page**, sees items, total, card and address, and clicks
    **Approve and pay**, which places the order and shows its id;
@@ -37,10 +41,10 @@ mandate. Payment and shipping come from the customer's saved profile, never thro
 
 | Tool | Who may call | Behaviour |
 |---|---|---|
-| `product_search(query?, category?, maxPrice?, limit?)` | anyone | 10 seed products; text is sanitised and marked third-party |
-| `add_to_cart(productId, quantity)` | anyone | session cart; the customer's cart once signed in |
-| `view_cart()` | anyone | the cart; for a signed-in customer exactly what checkout would buy, plus whether approval will be needed and the mandate left |
-| `remove_from_cart(productId, quantity?)` | anyone | removes a line or reduces it (e.g. an item the customer did not ask for) |
+| `product_search(query?, category?, maxPrice?, limit?)` | signed-in customer (anyone if `REQUIRE_SIGN_IN=false`) | 10 seed products; text is sanitised and marked third-party |
+| `add_to_cart(productId, quantity)` | signed-in customer (anyone: session cart) | the customer's shared cart; the line records the app that added it |
+| `view_cart()` | signed-in customer (anyone) | exactly what checkout would buy, who added each line, whether approval will be needed and the mandate left |
+| `remove_from_cart(productId, quantity?)` | signed-in customer (anyone) | removes a line or reduces it (e.g. an item the customer did not ask for) |
 | `one_step_checkout()` | customer token with `shop:api` + `ecommerce:checkout` | `401` without a token, `403 insufficient_scope` without the scope; then `placed` (within the mandate) or `approval_required` with a link; after approval `placed` with the order |
 | `list_orders(orderId?, limit?)` | customer token with `ecommerce:checkout` | the customer's own orders, newest first: id, status, how authorised, time, total, items, card, address |
 
@@ -197,6 +201,9 @@ registration stance, theft signals, …) are in [SECURITY-POSTURE.md §3](SECURI
 | D18 | **Secure defaults in config** (approval required, gateway headers untrusted, DPoP optional) | Permissive defaults | A misconfigured deployment fails closed. `REQUIRE_APPROVAL=false` refuses to start without being explicit. |
 | D20 | **Follow the MCP spec's server-side security rules even where impact is low**: Origin allow-list + route hostnames, sessions bound to their customer, only `shop:api` advertised | Accept low-impact deviations | Spec conformance is what lets clients we do not control behave predictably; each fix was small. Evaluation: [SECURITY-POSTURE.md 4.11](SECURITY-POSTURE.md#411-mcp-specification-conformance). |
 | D21 | **Sign-in on the shared gateway, same origin as the MCP endpoint** (issuer `http://localhost:8000/realms/mcp`; platform module `auth-route`). Only realm `mcp` is routed; master realm, admin console and admin API are not | Keycloak on its own origin (`:8080` port-forward) | Some clients refuse OAuth fetches to a private-network origin other than the MCP server's ([HARNESSES CC-4](HARNESSES.md#cc-4-openclaw-only-reaches-a-private-network-authorization-server-at-the-mcp-servers-origin): OpenClaw). One front door is also the production shape: one TLS endpoint, one place for rate limits and client-address handling. Consequence: DCR's sender-address check is off (behind a load balancer it sees the balancer); redirect URIs must still be loopback. |
+| D22 | **Sign in on first connect with both scopes** (`REQUIRE_SIGN_IN`, default true; supersedes "only `shop:api` advertised" in D20) | Anonymous browsing + step-up at checkout (the earlier design, still available with `false`) | Of the agent clients tested, none starts a sign-in mid-session; all can sign in before use, and one sign-in with both scopes avoids step-up, which Keycloak refuses for scopes a client did not register. Carts, mandates and browsing then follow the customer from the first call. Evidence: [CLIENT-COMPATIBILITY-REPORT.md](CLIENT-COMPATIBILITY-REPORT.md), [HARNESSES.md](HARNESSES.md) |
+| D23 | **One cart per customer, shared by all their agents; each line names the app that added it** | Per-agent carts merged at checkout | Checkout and the mandate judge the whole customer cart anyway; attribution (self-declared app name + client id) lets the customer remove what an agent added unasked, on `view_cart` and the approval page |
+| D24 | **Linked apps expire after 30 days** (platform job deletes self-registered clients and revokes consents; offline sessions end at 30 days) | Keycloak defaults | A periodic fresh start for every agent; platform-owned because clients and consents are realm-wide (`mcp-ecosystem-infra` `modules/client-expiry`) |
 | D19 | **Approval page uses `Referrer-Policy: same-origin`** | `no-referrer` | Under `no-referrer` browsers send `Origin: null` on form posts, which the anti-CSRF origin check correctly refuses: the customer's own click was blocked. `same-origin` sends the real origin and still nothing to other sites. |
 
 ---
@@ -237,6 +244,11 @@ docker build -t ecommerce-mcp-server:dev .                        # Rancher's Do
 kubectl apply -k deploy/k8s                                       # shop, session-manager, backend + route, edge policy
 kubectl -n mcp-servers rollout restart deploy/ecommerce-mcp-server deploy/session-manager   # after rebuilding the image
 ```
+
+Sign-in mode: `REQUIRE_SIGN_IN` in `deploy/k8s/shop-mcp.yaml` (`"true"`: sign in on first connect; `"false"`: the
+earlier anonymous-first design). Switch a running shop for a comparison with
+`kubectl -n mcp-servers set env deploy/ecommerce-mcp-server REQUIRE_SIGN_IN=false`; `kubectl apply -k deploy/k8s`
+puts the manifest's value back. The tests, probe and attack lab detect the mode from the advertised scopes.
 
 If the realm was recreated, `testuser` has a new id: put it in `DEMO_PROFILE_SUBJECTS` (`deploy/k8s/shop-mcp.yaml`):
 
@@ -362,15 +374,30 @@ platform's `KC_ADMIN_PASSWORD` it also resets and asserts the first-time consent
 ### 5.4 Attack lab
 
 ```bash
-TEST_USER_PASSWORD=… npx tsx test/attack/lab.ts [--only=A,C] [--report=docs/ATTACK-RESULTS.md] [--no-reset]
+TEST_USER_PASSWORD=… [KC_ADMIN_PASSWORD=…] npx tsx test/attack/lab.ts [--only=A,C] [--report=docs/ATTACK-RESULTS.md] [--no-reset]
 ```
+
+`KC_ADMIN_PASSWORD` (platform credential) enables I1, which retires a client the way the expiry job does.
 
 Plays each kind of client live: legitimate shopper (must stay easy), anonymous bot, token thief, rogue client
 registration, malicious website, in-cluster attacker, floods, refresh-token theft with the live session-manager
 response. Prints HELD / GOT THRU. Restarts the shop first; signed-in scenarios start from an empty customer cart;
 floods and theft run last (they rate-limit and reset the lab user for a few minutes).
 
-### 5.5 Planned: many clients on many devices
+### 5.5 Real agent harnesses, headless
+
+The harness CLIs can be driven from a script; two helpers stand in for the customer's browser:
+
+```bash
+TEST_USER_PASSWORD=… npx tsx scripts/sign-in-for-harness.ts '<authorization URL the harness printed>' [--print-callback]
+TEST_USER_PASSWORD=… npx tsx scripts/approve-as-customer.ts '<approval link the agent showed>'
+```
+
+Examples: `codex mcp login shop` prints the URL; `claude mcp login --no-browser shop` asks for the callback URL to be
+pasted (`--print-callback`); `openclaw mcp login shop` prints the URL. Then `codex exec`, `claude -p` or
+`openclaw agent -m` run the shopping prompts. Results and the per-client notes: [HARNESSES.md](HARNESSES.md).
+
+### 5.6 Planned: many clients on many devices
 
 Covered by unit tests today (`test/unit/mcp/server.test.ts`, "spending mandate"): one shared budget across devices;
 two carts that each fit but not together (one bought, one sent to approval); two devices checking out the same

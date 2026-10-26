@@ -60,6 +60,26 @@ a second sign-in or step-up. Codex and OpenClaw do not start the sign-in themsel
 customer runs one command (Claude Code and Inspector prompt for it). Hermes, the client this design was chiefly
 for, still has to be run.
 
+### Full re-test (S11b, 2026-10-26)
+
+**Retired client** (all harness clients deleted by the platform expiry job, `modules/client-expiry`):
+
+| Client | What happens | Recovery |
+|---|---|---|
+| Codex | Refresh fails (`failed to refresh OAuth tokens`); the shop drops out of its tools; agent: "connect or enable the shop MCP server". `codex mcp list` still shows `OAuth` | `codex mcp login shop`: registers a new client, one sign-in |
+| Claude Code | `/mcp` shows "Needs authentication"; agent tells the customer to sign in via `/mcp` | `/mcp` → Authenticate: new client, one sign-in |
+| OpenClaw | `openclaw mcp status` still says "authorized"; the agent guesses (start the server, log in, restart the gateway) | `openclaw mcp login shop`: new client, one sign-in |
+
+**Several agents, one cart:** Codex added the bottle, Claude Code the shoes; OpenClaw showed the cart with the app
+behind each line and checked out the whole cart. The approval page listed "Insulated Water Bottle ← codex-mcp-client
+(client e06eec2e)" and "Trail Running Shoes ← claude-code (client a30bb942)"; one approval placed one $114.98 order,
+and Codex listed it.
+
+**Resume after the sign-in session ends** (testuser's Keycloak sessions ended by an admin, as 30 minutes idle would;
+offline sessions kept; checked after the access tokens expired): Codex and Claude Code carried on with their offline
+tokens, no sign-in. OpenClaw's refresh was refused (`REFRESH_TOKEN_ERROR invalid_token`): it holds no offline token,
+so the shop dropped out of its tools until `openclaw mcp login shop`.
+
 ## 1. OpenClaw (formerly Clawdbot)
 
 Docs (repository `openclaw/openclaw`): `docs/cli/mcp/transports.md` (MCP OAuth), `docs/tools/mcp.md`,

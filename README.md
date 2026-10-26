@@ -9,12 +9,18 @@ manifests, and [`platform/tenant.yaml`](platform/tenant.yaml), which declares wh
 platform (namespace, gateway paths, identity-provider scopes and clients). The platform team registers that file and
 the platform creates everything with its own credentials; this repo holds none.
 
+**Sign in on first connect** (default, `REQUIRE_SIGN_IN=true`): an agent's first request gets `401` with both scopes
+(`shop:api ecommerce:checkout`); the customer signs in and consents once in their app, and every tool then works with
+no further sign-in. All of a customer's agents share one cart, and each line names the app that added it.
+`REQUIRE_SIGN_IN=false` restores the earlier anonymous-first design (browse without a token, step-up for checkout).
+Why: [docs/CLIENT-COMPATIBILITY-REPORT.md](docs/CLIENT-COMPATIBILITY-REPORT.md).
+
 | Tool | Auth | Behaviour |
 |---|---|---|
-| `product_search` | none | Search the catalog by words, category, max price |
-| `add_to_cart` | none (session cart) | Adds to the visitor's cart, keyed by the server-issued `Mcp-Session-Id` |
-| `view_cart` | none | Shows the cart; for a signed-in customer, exactly what checkout would buy |
-| `remove_from_cart` | none | Removes a line or reduces its quantity (e.g. something the customer did not ask for) |
+| `product_search` | signed in (none if `REQUIRE_SIGN_IN=false`) | Search the catalog by words, category, max price |
+| `add_to_cart` | signed in (none if `REQUIRE_SIGN_IN=false`) | Adds to the customer's shared cart, recording which app added the line |
+| `view_cart` | signed in (none if `REQUIRE_SIGN_IN=false`) | Shows the cart with who added each line; exactly what checkout would buy |
+| `remove_from_cart` | signed in (none if `REQUIRE_SIGN_IN=false`) | Removes a line or reduces its quantity (e.g. something the customer did not ask for) |
 | `one_step_checkout` | customer login + consent, **and the customer's approval of each purchase** | Orders the cart with the address and card saved on the customer's profile |
 | `list_orders` | customer login | The customer's recent orders (or one by id): order id, status, total, items |
 

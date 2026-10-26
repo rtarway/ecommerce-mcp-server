@@ -16,6 +16,28 @@ when an agent first connects, with every scope at once.**
 - It costs anonymous discovery.
 - Antigravity and claude.ai additionally need fixes to the identity provider's registration rules.
 
+## Implementation results (2026-10-26)
+
+R1–R7 are implemented and running (plan: [plans/SIGN-IN-ON-CONNECT.md](plans/SIGN-IN-ON-CONNECT.md)).
+`REQUIRE_SIGN_IN=false` restores the anonymous-first design (verified).
+
+| Client | One sign-in, then browse, cart, approval, order | After its client is retired | Next day (sign-in session ended) |
+|---|---|---|---|
+| Claude Code 2.1.308 | ✅ prompts the customer itself (`/mcp`) | "Needs authentication"; tells the customer how; `/mcp` recovers | ✅ offline token, no sign-in |
+| Codex 0.163.0 | ✅ after `codex mcp login shop` (does not start it on the 401) | Shop silently unavailable; `codex mcp login shop` recovers | ✅ offline token, no sign-in |
+| OpenClaw 2026.10.3 | ✅ after `openclaw mcp login shop`; first full OpenClaw purchase | Status still "authorized", agent guesses; `openclaw mcp login shop` recovers | ❌ no offline token: sign in again |
+| MCP Inspector | ✅ | — | — |
+| Hermes | not run (needs a model provider key) | — | — |
+
+- **Several agents, one cart:** Codex and Claude Code filled one customer cart. OpenClaw checked it out with one
+  approval, and the approval page named the app behind each line.
+- **Codex registration:** with internal scopes no longer advertised, Codex registers without any scope
+  configuration (F5 fixed for that client).
+- **Security:** the attack lab holds 29 of 30 scenarios (D4 as before). Three new findings:
+  - one flaw fixed: the session-manager trusted the client's `X-Forwarded-For`;
+  - one risk accepted and recorded: a client that refreshes twice in parallel signs its customer out everywhere;
+  - one residual: a retired client's last access token works for up to 5 minutes.
+
 ## 1. The shop MCP server in brief
 
 | Area | Design |

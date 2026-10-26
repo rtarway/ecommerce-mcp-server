@@ -130,7 +130,7 @@ Open items with an owner and a fix: [§9](#9-deviations-and-remediation).
 | 6.1.7 | Insufficient scope → 403 `insufficient_scope` with the needed scopes | SHOULD | ✅ | unit |
 | 6.1.8 | Accept only own tokens; never pass tokens through | MUST / MUST NOT | ✅ | audience check; the server calls no upstream API with client tokens |
 | 6.1.9 | Tokens only in the `Authorization` header, not the query string | MUST | ✅ | probe A5 |
-| 6.1.10 | `scopes_supported` minimal (scope minimisation) | SHOULD | ✅ | probe A2 (`["shop:api"]`; checkout via step-up) |
+| 6.1.10 | `scopes_supported` minimal (scope minimisation) | SHOULD | ⚠️ deliberate deviation | Sign-in first (default since 2026-10-26) advertises `["shop:api","ecommerce:checkout"]` so clients sign in and consent once; few clients do step-up and Keycloak refuses step-up to a scope not registered ([report](CLIENT-COMPATIBILITY-REPORT.md), SECURITY-POSTURE S25). `REQUIRE_SIGN_IN=false` restores `["shop:api"]` + step-up. Probe A2 checks whichever mode is deployed |
 | 6.1.11 | No `offline_access` in `scopes_supported` or challenges | SHOULD NOT | ✅ | probe A2, A3 |
 | 6.1.12 | Account for scope hierarchies | MUST | N/A | flat scopes |
 | 6.1.13 | Sender-constrained tokens (DPoP, RFC 9449) | beyond spec | ✅ supported | bound tokens require a proof; Bearer downgrade refused; unit |
@@ -158,7 +158,7 @@ Open items with an owner and a fix: [§9](#9-deviations-and-remediation).
 | 7.3 | SSRF | N/A | the server fetches no client-supplied URLs; the platform does not fetch client metadata (no CIMD) |
 | 7.4 | Session / state-handle hijacking | ✅ | 4.7–4.9 |
 | 7.5 | Local MCP server compromise | N/A | remote server |
-| 7.6 | Scope minimisation | ✅ | 6.1.10; checkout and order history via step-up |
+| 7.6 | Scope minimisation | ⚠️ | 6.1.10: deliberate deviation in sign-in-first mode; step-up remains as a second line for tokens without the checkout scope |
 | 7.7 | Server-owned consent page: identify the client, CSRF protection, anti-framing, state single-use ≤ 10 min, exact redirect | ✅ | the purchase-approval page (lab E1, E2; unit). Guidance written for proxy consent pages, applied by analogy |
 | 7.8 | Consent cookies: `__Host-` prefix, `Secure`, `HttpOnly`, `SameSite` | ⚠️ | `HttpOnly`; `SameSite=Strict`/`Lax`; `Secure` only when the public URL is HTTPS (lab is HTTP); no `__Host-` prefix (cookies are scoped to `Path=/approve`) |
 | 7.9 | Authorization-URL validation, mix-up attacks | N/A (client side) | the platform emits RFC 9207 `iss` (6.2.8) |

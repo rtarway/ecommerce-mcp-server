@@ -7,9 +7,11 @@ concept**: the shop is a demo, the infrastructure a laptop lab. The purpose is t
 not control can attack a shop that lets agents buy for customers, and which design keeps it safe without making it
 hard for legitimate shoppers.
 
-**Status as of 2026-10-12.** Every vector below was exercised against the running stack by the attack lab
-(`test/attack/lab.ts`; latest run in [ATTACK-RESULTS.md](ATTACK-RESULTS.md); the only scenario that gets through is
-the known open item D4) and/or by unit tests (182, `npm test`). MCP specification conformance: [4.11](#411-mcp-specification-conformance). The original review that started this work is archived at
+**Status as of 2026-10-26: sign in on first connect** (`REQUIRE_SIGN_IN=true`, the default; `false` restores the
+earlier anonymous-first design, tag `pre-sign-in-on-connect`). Every vector below was exercised against the running
+stack by the attack lab (`test/attack/lab.ts`, 30 scenarios; latest run in [ATTACK-RESULTS.md](ATTACK-RESULTS.md);
+the only scenario that gets through is the known open item D4) and/or by unit tests (194, `npm test`). Why sign-in
+first: [CLIENT-COMPATIBILITY-REPORT.md](CLIENT-COMPATIBILITY-REPORT.md). MCP specification conformance: [4.11](#411-mcp-specification-conformance). The original review that started this work is archived at
 [archive/2026-10-07-security-review.md](archive/2026-10-07-security-review.md). Architecture and product/platform
 decisions are in [GUIDE.md](GUIDE.md).
 
@@ -36,7 +38,9 @@ try to. Instead:
 4. **Everything is bounded** (rates, sessions, carts, approvals, spend), so floods cost the attacker more than the shop.
 5. **Platform automation is guarded like the app**: tenants cannot claim each other's names, paths or privileges.
 
-Browsing and filling a cart stay anonymous and frictionless.
+Agents sign the customer in **once, when they first connect**, with both scopes; after that browsing, cart and
+checkout need no further sign-in (only the approval). Real MCP clients rarely sign in mid-session, so this is the
+design every tested client can follow.
 
 ```mermaid
 flowchart LR
@@ -127,6 +131,11 @@ Each records what was chosen, what else was considered, and why.
 | S22 | **Bind MCP sessions to the first customer that uses them** | Session = anonymous cart key only | MCP security best practices: bind session ids (state handles) to the user and never treat possession as authentication. A bound session presented by anyone else, or without the owner's token, is answered like an unknown id. |
 | S23 | **Advertise only the base scope (`shop:api`); `ecommerce:checkout` only via step-up challenge** | List every scope in `scopes_supported` | MCP scope minimisation: a client that authorises before any challenge should not get purchase consent up front. Challenges name exactly what the current operation needs. |
 | S24 | **Sign-in published on the shared gateway, realm `mcp` only** (platform `auth-route`; issuer `http://localhost:8000/realms/mcp`). Not published: master realm, admin console, admin API. Gateway stamps `X-Forwarded-For` and drops client-sent forwarding headers; Keycloak believes them only from pod addresses. Per-address rate limit (600/min) in front of Keycloak | Keycloak on its own origin through a port-forward | Clients may refuse to reach a private authorization server on another origin (OpenClaw, [HARNESSES CC-4](HARNESSES.md#cc-4-openclaw-only-reaches-a-private-network-authorization-server-at-the-mcp-servers-origin)); one front door is the production shape. Trade-off: DCR's sender-address check is off, because behind a load balancer it only sees the balancer; the redirect-URI check (loopback only) stays. Locally every client shares one address (Rancher's ServiceLB rewrites it), so per-address limits and Keycloak events see one client. |
+| S25 | **Sign in on first connect, both scopes advertised** (supersedes S23 while `REQUIRE_SIGN_IN=true`): every MCP request needs a valid token; `initialize` without one gets `401` with resource metadata, `shop:api ecommerce:checkout` and an `error_description` telling the customer what to do | Anonymous browsing with step-up for checkout (S23) | Tested clients either sign in only on a connect-time 401 (Hermes) or before use (Codex, OpenClaw, Claude Code); none completed anonymous-then-sign-in, and Keycloak refused the one correct step-up. Cost: no anonymous discovery; every token can buy from the first minute (money still needs approval above the mandate). A deliberate deviation from the scope-minimisation SHOULD |
+| S26 | **Browsing recorded per customer and app** (`browse` audit events: search text, cart changes, client, session, declared app name); the `shop:api` consent text says so | No record | The customer's agents are linked from the first call; the record serves service and theft investigation. Personal data: named in consent, retention limited by the log pipeline (production: a fixed limit, e.g. 90 days) |
+| S27 | **One cart per customer shared by all their agents; each line names the app that added it**, in `view_cart` and on the approval page | Per-agent carts merged at checkout | One cart is what checkout and the mandate judge anyway; attribution lets the customer remove what an agent added without being asked. Names are self-declared and labelled as such; approvals cover products and quantities only |
+| S28 | **30-day clock for linked apps** (platform `modules/client-expiry`): self-registered clients and consents are removed after 30 days; offline sessions already end at 30 days | Keycloak defaults (no expiry) | Forces a periodic fresh registration, sign-in and consent. A retired client's refresh is refused at once; its last access token works until it expires (≤ 5 min) |
+| S29 | **The session-manager takes the client address only from the gateway** (`x-gateway-client-address`, extAuth `addRequestHeaders: source.address`), never from `X-Forwarded-For` | Last `X-Forwarded-For` hop | extAuth runs before the gateway rewrites `X-Forwarded-For`, so the session-manager saw the client's own value: a client could trip or hide the disjoint-networks theft signal. Found by attack-lab A2 once every request carried a token |
 | S20 | **Approval page headers**: `X-Frame-Options: DENY`, CSP `frame-ancestors 'none'`, `Referrer-Policy: same-origin`, `no-store` | `no-referrer` | Anti-clickjacking and no caching; `same-origin` because `no-referrer` makes browsers send `Origin: null` on the Approve form, which the anti-CSRF origin check refuses. |
 
 ---
@@ -279,7 +288,14 @@ revision **2025-11-25** (sessions, `initialize`); the current revision is **2026
 6. **Tenant isolation on the shared gateway**: admission policy for routes; per-tenant Keycloak admin scoping; offboarding.
 7. **Platform hardening**: TLS everywhere, SPIRE as mesh CA, Istio CNI (PSA baseline), image digests, the
    after-sleep certificate fix.
-8. **Customer controls**: setting the mandate on the website; notifications (today log lines); consent expiry.
+8. **Customer controls**: setting the mandate on the website; notifications (today log lines). (Consent expiry: done, S28.)
+13. **Parallel refreshes sign the customer out** (attack H3): with single-use refresh tokens, a client that refreshes
+    twice at once after using its token triggers the theft response. Watch real clients; options are a short reuse
+    grace period in Keycloak or client guidance.
+14. **Retirement and expiry messaging**: Codex and OpenClaw do not tell the customer how to sign in again after their
+    client is retired (Codex: "connect or enable the server"; OpenClaw: guesses). The shop's `error_description` is
+    not relayed by them.
+15. **OpenClaw does not request `offline_access`**: its sign-in ends with the Keycloak session (30 min idle, 10 h).
 9. **DPoP with a real client**, then consider requiring it for the checkout scope.
 10. **Per-tool authorization at the edge** (CEL on `jwt.scope`); the server enforces it today.
 11. **Platform identity provider:** exact redirect URIs for the test client (no wildcards); do not advertise `plain` PKCE.
