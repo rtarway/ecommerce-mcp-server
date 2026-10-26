@@ -8,7 +8,7 @@
 import { writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import {
-  GATEWAY, KEYCLOAK, MCP_URL, McpClient, PASSWORD, REALM_URL, SHOP_SCOPE, approveInBrowser, claims, kubectl, login, refresh, sleep,
+  GATEWAY, KEYCLOAK, MCP_URL, McpClient, PASSWORD, REALM_URL, SHOP_SCOPE, SIGN_IN_FIRST, approveInBrowser, claims, kubectl, login, refresh, sleep,
   type Outcome, type Scenario,
 } from "./lib.js";
 
@@ -40,6 +40,29 @@ const scenarios: Scenario[] = [
     impact: "Shoppers cannot buy, or need too many steps",
     async run() {
       const t0 = Date.now();
+      if (SIGN_IN_FIRST) {
+        // Sign in on first connect: refused without a token, then one sign-in covers browsing, cart and checkout.
+        const refused = await new McpClient().init();
+        if (refused.status !== 401 || !/scope="[^"]*ecommerce:checkout/.test(refused.headers.get("www-authenticate") ?? "")) return breach(`connect without token: HTTP ${refused.status}`);
+        const tokens = await login({ scope: SHOP_SCOPE });
+        const c = new McpClient().withAuth(tokens.accessToken);
+        await c.init();
+        await c.clearCart();
+        const search = await c.tool("product_search", { query: "running shoes" });
+        const add = await c.tool("add_to_cart", { productId: "shoe-trail-001", quantity: 1 });
+        if (!search.structured?.products?.length || !add.structured?.cart) return breach("signed-in browse/cart failed");
+        const first = await c.tool("one_step_checkout");
+        if (first.structured?.status !== "approval_required") return breach(`expected approval_required, got ${JSON.stringify(first.structured ?? first.text)}`);
+        const approved = await approveInBrowser(first.structured.approvalUrl);
+        if (!/Order ord_\w+ for \$[\d.]+ is placed/.test(approved.result ?? "")) return breach(`approval page flow failed at ${approved.stage} (${approved.status})`);
+        const second = await c.tool("one_step_checkout");
+        if (second.structured?.status !== "placed") return breach(`order not placed: ${second.text}`);
+        const listed = (await c.tool("list_orders")).structured?.orders?.[0]?.orderId;
+        if (listed !== second.structured.order.orderId) return breach(`list_orders does not show the new order first: ${listed}`);
+        const retry = await c.tool("one_step_checkout");
+        const idem = retry.structured?.order?.orderId === second.structured.order.orderId;
+        return { held: idem, note: `sign-in first: connect refused without a token (401, both scopes); order ${second.structured.order.orderId} placed in ${((Date.now() - t0) / 1000).toFixed(1)}s; customer actions: 1 sign-in + 1 approval; no step-up; retry ${idem ? "returned same order (no double charge)" : "DID NOT dedupe"}` };
+      }
       const anon = new McpClient();
       await anon.init();
       const search = await anon.tool("product_search", { query: "running shoes" });
@@ -125,7 +148,7 @@ const scenarios: Scenario[] = [
     id: "A2", persona: "Anonymous bot", vector: "Spoofed trust headers (X-Forwarded-For, x-trust-tier, x-mcp-session-id, x-installation-id)",
     impact: "Forge client identity / bypass cooling-off / hijack a session through the edge",
     async run() {
-      const c = new McpClient();
+      const c = SIGN_IN_FIRST ? (await withToken()).client : new McpClient();
       await c.init();
       const r = await c.tool("add_to_cart", { productId: "bottle-001", quantity: 1 }, ).catch(() => undefined);
       const spoof = await c.post(
@@ -205,6 +228,20 @@ const scenarios: Scenario[] = [
   },
 
   // ───────────────────────── C. token thief / compromised client ─────────────────────────
+  {
+    id: "A8", persona: "Anonymous bot", vector: "Connect and browse without signing in (sign-in-first deployments)",
+    impact: "Unattributed traffic, scraping, anonymous carts",
+    async run() {
+      if (!SIGN_IN_FIRST) return held("not applicable: this deployment allows anonymous browsing (REQUIRE_SIGN_IN=false)");
+      const c = new McpClient();
+      const init = await c.init();
+      const tool = await c.tool("product_search", { query: "bottle" });
+      const header = init.headers.get("www-authenticate") ?? "";
+      // A tool call without a session is refused too (by the gateway with 400 before it reaches the shop, or 401).
+      const ok = init.status === 401 && !init.headers.get("mcp-session-id") && tool.status >= 400 && !tool.structured && /resource_metadata=/.test(header) && /error_description="[^"]*sign in/.test(header);
+      return ok ? held(`initialize → 401 with resource metadata, both scopes and sign-in instructions, no session id; tool call → ${tool.status}, nothing returned`) : breach(`initialize ${init.status}, tool ${tool.status}`);
+    },
+  },
   {
     id: "C1", persona: "Token thief", vector: "Stolen access token (with checkout scope) used to buy",
     impact: "Money moves without the customer",
@@ -371,6 +408,16 @@ const scenarios: Scenario[] = [
     id: "G1", persona: "Anonymous bot", vector: "Session flood: 150 initialize calls in a burst",
     impact: "Memory exhaustion / denial of service for real shoppers",
     async run() {
+      if (SIGN_IN_FIRST) {
+        // Without a token nothing is created at all; with one, the per-address initialize limit still applies.
+        const anon = await Promise.all(Array.from({ length: 150 }, () => new McpClient().post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "f", version: "1" } } }).then((r) => r.status)));
+        const { accessToken } = await login({ scope: SHOP_SCOPE });
+        const signed = await Promise.all(Array.from({ length: 150 }, () => new McpClient().withAuth(accessToken).post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "f", version: "1" } } }).then((r) => r.status)));
+        await sleep(65_000);
+        const anonRefused = anon.every((c) => c === 401 || c === 429);
+        const limited = signed.filter((c) => c === 429).length;
+        return anonRefused && limited > 0 ? held(`no token: all 150 refused (401/429), no session created; signed in: ${signed.filter((c) => c === 200).length} accepted, ${limited} rate-limited`) : breach(`no token: ${anon.filter((c) => c === 200).length} sessions created; signed in: ${limited} limited`);
+      }
       const codes = await Promise.all(Array.from({ length: 150 }, () => new McpClient().post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "f", version: "1" } } }).then((r) => r.status)));
       const ok = codes.filter((c) => c === 200).length;
       const limited = codes.filter((c) => c === 429).length;

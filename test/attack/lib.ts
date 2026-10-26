@@ -87,6 +87,15 @@ export async function login(opts: { clientId?: string; scope: string; redirectUr
 
 export const SHOP_SCOPE = "openid shop:api ecommerce:checkout";
 
+/**
+ * Sign-in-first deployments (REQUIRE_SIGN_IN=true) advertise the checkout scope up front and refuse every MCP request
+ * without a token; anonymous-first ones advertise only the API scope. Scenarios adapt to the deployment.
+ */
+export const SIGN_IN_FIRST = await fetch(`${GATEWAY}/.well-known/oauth-protected-resource/mcp`)
+  .then((r) => r.json() as Promise<{ scopes_supported?: string[] }>)
+  .then((m) => (m.scopes_supported ?? []).includes("ecommerce:checkout"))
+  .catch(() => false);
+
 export async function refresh(clientId: string, refreshToken: string) {
   const res = await fetch(`${REALM_URL}/protocol/openid-connect/token`, {
     method: "POST",

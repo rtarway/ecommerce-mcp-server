@@ -8,7 +8,8 @@ import { approveInBrowser, kubectl, sleep } from "../attack/lib.js";
  * Black-box journey against a running deployment (local process or the cluster gateway):
  *   MCP_URL=http://localhost:8000/mcp TEST_USER_PASSWORD=... npm run test:e2e
  * Behaves like a real MCP client: 401 challenge -> discovery -> PKCE login (+ consent) -> retry; and like the
- * customer: opens the approval link, signs in again, approves.
+ * customer: opens the approval link, signs in again, approves. Runs the journey that matches the deployment:
+ * sign in on first connect (REQUIRE_SIGN_IN=true, both scopes advertised) or anonymous first (false).
  */
 const MCP_URL = process.env.MCP_URL ?? "http://localhost:8000/mcp";
 const PASSWORD = process.env.TEST_USER_PASSWORD ?? "";
@@ -99,7 +100,56 @@ async function resetShop() {
   await sleep(5000);
 }
 
-describe.runIf(PASSWORD)("shop MCP journey", () => {
+const prmUrl = new URL(`/.well-known/oauth-protected-resource${new URL(MCP_URL).pathname}`, MCP_URL).href;
+const advertised = PASSWORD ? (((await (await fetch(prmUrl)).json()) as { scopes_supported?: string[] }).scopes_supported ?? []) : [];
+/** Sign-in-first deployments advertise the checkout scope up front; anonymous-first ones only the API scope. */
+const SIGN_IN_FIRST = advertised.includes("ecommerce:checkout");
+
+describe.runIf(PASSWORD && SIGN_IN_FIRST)("shop MCP journey: sign in on first connect", () => {
+  beforeAll(async () => {
+    await resetShop();
+    await resetConsent();
+  }, 180_000);
+
+  it("connecting without a token asks for one sign-in with both scopes; then browse, cart and checkout need no more", async () => {
+    // 1. No token: refused before any session exists, with both scopes and what the customer should do
+    await expect(connect()).rejects.toThrow();
+    expect(lastStatus).toBe(401);
+    expect(lastChallenge).toMatch(/scope="shop:api ecommerce:checkout"/);
+    expect(lastChallenge).toMatch(/error_description="[^"]*sign in[^"]*"/);
+
+    // 2. The customer signs in once and consents to the agent shopping for them
+    const first = await stepUpLogin(lastChallenge!);
+    if (KC_ADMIN_PASSWORD) expect(first.consentShown).toBe(true);
+    expect(first.grantedScope).toContain("ecommerce:checkout");
+    bearer = first.accessToken;
+
+    // 3. Browse, cart, checkout on that one sign-in: no step-up; money still needs the customer's approval
+    const agent = await connect();
+    expect(structured(await agent.callTool({ name: "product_search", arguments: { query: "running shoes" } })).products.length).toBeGreaterThan(0);
+    structured(await agent.callTool({ name: "add_to_cart", arguments: { productId: "shoe-trail-001", quantity: 1 } }));
+    const pending = structured(await agent.callTool({ name: "one_step_checkout", arguments: {} }));
+    expect(pending.status).toBe("approval_required");
+    expect((await approveInBrowser(pending.approvalUrl)).result).toMatch(/Order ord_\w+ for \$[\d.]+ is placed/);
+    const order = structured(await agent.callTool({ name: "one_step_checkout", arguments: {} })).order;
+    expect(order.total).toBe(89.99);
+    expect(structured(await agent.callTool({ name: "list_orders", arguments: {} })).orders.length).toBeGreaterThan(0);
+
+    // 4. A second agent of the same customer (new connection) shares the customer's cart; a later sign-in skips consent
+    const again = await stepUpLogin(lastChallenge!);
+    expect(again.consentShown).toBe(false);
+    bearer = again.accessToken;
+    const second = await connect();
+    structured(await agent.callTool({ name: "add_to_cart", arguments: { productId: "bottle-001", quantity: 1 } }));
+    const shared = structured(await second.callTool({ name: "view_cart", arguments: {} }));
+    expect(shared.cart.items.map((i: { productId: string }) => i.productId)).toContain("bottle-001");
+    const pending2 = structured(await second.callTool({ name: "one_step_checkout", arguments: {} }));
+    await approveInBrowser(pending2.approvalUrl);
+    expect(structured(await second.callTool({ name: "one_step_checkout", arguments: {} })).order.total).toBe(24.99);
+  });
+});
+
+describe.runIf(PASSWORD && !SIGN_IN_FIRST)("shop MCP journey: anonymous first", () => {
   beforeAll(async () => {
     await resetShop();
     await resetConsent();
@@ -137,7 +187,6 @@ describe.runIf(PASSWORD)("shop MCP journey", () => {
     bearer = undefined;
     const restarted = await connect();
     structured(await restarted.callTool({ name: "add_to_cart", arguments: { productId: "bottle-001", quantity: 1 } }));
-    const prmUrl = new URL(`/.well-known/oauth-protected-resource${new URL(MCP_URL).pathname}`, MCP_URL).href;
     const again = await stepUpLogin(`resource_metadata="${prmUrl}", scope="shop:api ecommerce:checkout"`);
     expect(again.consentShown).toBe(false);
     bearer = again.accessToken;

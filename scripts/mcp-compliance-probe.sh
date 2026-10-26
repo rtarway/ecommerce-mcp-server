@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 # Probes the deployed shop through the gateway for MCP protocol/transport requirements (revision 2025-11-25).
-# Evidence for docs/MCP-COMPLIANCE.md. Anonymous only: no credentials needed.
+# Evidence for docs/MCP-COMPLIANCE.md.
 #   scripts/mcp-compliance-probe.sh [MCP_URL]        (default http://localhost:8000/mcp)
+# Sign-in-first deployments (both scopes advertised) refuse every MCP request without a token: the probe then needs
+# TOKEN=<access token>, or TEST_USER_PASSWORD to obtain one with scripts/get-token.ts. Anonymous-first: no credentials.
 set -uo pipefail
 U="${1:-http://localhost:8000/mcp}"
 PRM="$(python3 -c "import sys;from urllib.parse import urlsplit as u;p=u(sys.argv[1]);print(f'{p.scheme}://{p.netloc}/.well-known/oauth-protected-resource{p.path}')" "$U")"
-H=(-H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream')
+PRMDOC=$(curl -s "$PRM")
+SIGNIN_FIRST=$(python3 -c "import sys,json;print('yes' if 'ecommerce:checkout' in json.loads(sys.argv[1]).get('scopes_supported',[]) else 'no')" "$PRMDOC")
+A=(-H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream')   # never carries a token
+H=("${A[@]}")
+if [ "$SIGNIN_FIRST" = yes ]; then
+  if [ -z "${TOKEN:-}" ] && [ -n "${TEST_USER_PASSWORD:-}" ]; then TOKEN=$(MCP_URL="$U" npx -s tsx "$(dirname "$0")/get-token.ts" 2>/dev/null | tail -1); fi
+  [ -n "${TOKEN:-}" ] || { echo "sign-in-first deployment: set TOKEN or TEST_USER_PASSWORD"; exit 2; }
+  H+=(-H "Authorization: Bearer $TOKEN")
+fi
 pass=0; finding=0
 check() { # check <id> <requirement> <actual> <expected-regex>
   if grep -Eq "$4" <<<"$3"; then echo "PASS     $1  $2"; pass=$((pass+1)); else echo "FINDING  $1  $2"; echo "         got: ${3:0:200}"; finding=$((finding+1)); fi
@@ -28,7 +38,7 @@ check T5 "unsupported MCP-Protocol-Version -> 400 (MUST)" "$(curl -s -o /dev/nul
 check T6 "Accept without text/event-stream refused" "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$U" -H 'Content-Type: application/json' -H 'Accept: application/json' "${S[@]}" -d '{"jsonrpc":"2.0","id":7,"method":"ping"}')" '^406$'
 check T7 "request without a session (non-initialize) -> 400 (SHOULD, servers requiring sessions)" "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$U" "${H[@]}" -d '{"jsonrpc":"2.0","id":8,"method":"tools/list"}')" '^400$'
 IREQ='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}'
-check T8 "hostile Origin -> 403 (MUST, DNS rebinding)" "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$U" "${H[@]}" -H 'Origin: http://evil.example' -d "$IREQ")" '^403$'
+check T8 "hostile Origin -> 403 (MUST, DNS rebinding)" "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$U" "${A[@]}" -H 'Origin: http://evil.example' -d "$IREQ")" '^403$'
 check T9 "unknown method -> JSON-RPC -32601 Method not found" "$(curl -s -X POST "$U" "${H[@]}" "${S[@]}" -d '{"jsonrpc":"2.0","id":10,"method":"nope/nope"}' | tr -d '\n')" '"code":-32601'
 TOOLS=$(curl -s -X POST "$U" "${H[@]}" "${S[@]}" -d '{"jsonrpc":"2.0","id":11,"method":"tools/list"}' | data)
 check X1 "tools capability declared (MUST)" "$INIT" '"capabilities":\{"tools"'
@@ -39,9 +49,15 @@ check X5 "unknown tool -> protocol error -32602 (not a tool result)" "$(curl -s 
 check X6 "invalid arguments -> tool execution error (isError) (2025-11-25)" "$(curl -s -X POST "$U" "${H[@]}" "${S[@]}" -d '{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"add_to_cart","arguments":{"productId":"bottle-001","quantity":99}}}' | data)" '"isError":true'
 check X7 "structured results also serialised as text (SHOULD)" "$(curl -s -X POST "$U" "${H[@]}" "${S[@]}" -d '{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"product_search","arguments":{"limit":1}}}' | data)" '"structuredContent".*|"text":".*products'
 check A1 "protected-resource metadata: resource + authorization_servers (MUST)" "$(curl -s "$PRM")" '"resource":".*"authorization_servers":\['
-check A2 "scopes_supported minimal, no offline_access (SHOULD / SHOULD NOT)" "$(curl -s "$PRM")" '"scopes_supported":\["shop:api"\]'
-check A3 "protected tool without token -> 401 + WWW-Authenticate resource_metadata + scope (MUST/SHOULD)" "$(curl -si -X POST "$U" "${H[@]}" "${S[@]}" -d '{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"one_step_checkout","arguments":{}}}' | tr -d '\r' | grep -iE '^HTTP|^www-authenticate' | tr '\n' ' ')" '401.*resource_metadata=.*scope='
-check A4 "invalid token -> 401 invalid_token (MUST)" "$(curl -si -X POST "$U" "${H[@]}" -H 'Authorization: Bearer garbage' -d "$IREQ" | tr -d '\r' | grep -iE '^HTTP|^www-authenticate' | tr '\n' ' ')" '401.*invalid_token'
-check A5 "access token in the query string not accepted (MUST)" "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$U?access_token=x" "${H[@]}" "${S[@]}" -d '{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"list_orders","arguments":{}}}')" '^401$'
+if [ "$SIGNIN_FIRST" = yes ]; then
+  # Deliberate deviation from scope minimisation (report R2): both scopes up front, so clients sign in once.
+  check A2 "scopes_supported: both scopes (sign-in first; no offline_access)" "$PRMDOC" '"scopes_supported":\["shop:api","ecommerce:checkout"\]'
+  check A3 "connect without token -> 401 + resource_metadata + both scopes + error_description (MUST/SHOULD)" "$(curl -si -X POST "$U" "${A[@]}" -d "$IREQ" | tr -d '\r' | grep -iE '^HTTP|^www-authenticate|^mcp-session-id' | tr '\n' ' ')" '^HTTP/1.1 401 [^ ]* www-authenticate: Bearer resource_metadata=.*scope="shop:api ecommerce:checkout".*error_description='
+else
+  check A2 "scopes_supported minimal, no offline_access (SHOULD / SHOULD NOT)" "$PRMDOC" '"scopes_supported":\["shop:api"\]'
+  check A3 "protected tool without token -> 401 + WWW-Authenticate resource_metadata + scope (MUST/SHOULD)" "$(curl -si -X POST "$U" "${H[@]}" "${S[@]}" -d '{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"one_step_checkout","arguments":{}}}' | tr -d '\r' | grep -iE '^HTTP|^www-authenticate' | tr '\n' ' ')" '401.*resource_metadata=.*scope='
+fi
+check A4 "invalid token -> 401 invalid_token (MUST)" "$(curl -si -X POST "$U" "${A[@]}" -H 'Authorization: Bearer garbage' -d "$IREQ" | tr -d '\r' | grep -iE '^HTTP|^www-authenticate' | tr '\n' ' ')" '401.*invalid_token'
+check A5 "access token in the query string not accepted (MUST)" "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$U?access_token=${TOKEN:-x}" "${A[@]}" "${S[@]}" -d '{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"list_orders","arguments":{}}}')" '^(400|401)$'
 check S1 "DELETE ends the session; reuse -> 404 (MUST)" "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$U" "${S[@]}") $(curl -s -o /dev/null -w '%{http_code}' -X POST "$U" "${H[@]}" "${S[@]}" -d '{"jsonrpc":"2.0","id":18,"method":"ping"}')" '^20[24] 404$'
 echo "---- $pass pass, $finding finding(s)"

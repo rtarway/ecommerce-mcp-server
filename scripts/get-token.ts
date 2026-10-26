@@ -27,9 +27,9 @@ const { accessToken, consentShown } = await loginWithPkce({
   tokenEndpoint: meta.token_endpoint,
   clientId: process.env.CLIENT_ID ?? "mcp-test-client",
   redirectUri: "http://localhost:53682/callback",
-  // The server advertises only its base scope (scope minimisation); a customer token for checkout also needs the
-  // step-up scope, so ask for both up front here.
-  scope: process.env.SCOPE ?? `openid ${[...prm.scopes_supported, "ecommerce:checkout"].join(" ")}`,
+  // Sign-in-first deployments advertise both scopes; anonymous-first ones only the base scope (checkout by step-up),
+  // so always ask for the checkout scope too.
+  scope: process.env.SCOPE ?? `openid ${[...new Set([...prm.scopes_supported, "ecommerce:checkout"])].join(" ")}`,
   username: process.env.TEST_USER ?? "testuser",
   password,
 });
