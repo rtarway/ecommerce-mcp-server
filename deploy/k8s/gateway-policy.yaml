@@ -28,7 +28,11 @@ spec:
       failureMode: FailOpen # availability for shoppers; the shop itself still enforces tokens, approvals and caps
       http:
         path: "'/check'"
-        allowedRequestHeaders: [authorization, dpop, user-agent, mcp-session-id, x-forwarded-for]
+        # The client address comes from the gateway's own view of the connection, never from the client's
+        # X-Forwarded-For (extAuth runs before the transformation below rewrites it).
+        allowedRequestHeaders: [authorization, dpop, user-agent, mcp-session-id]
+        addRequestHeaders:
+          x-gateway-client-address: "source.address"
         allowedResponseHeaders: [x-trust-tier, x-installation-id]
     transformation:
       request:

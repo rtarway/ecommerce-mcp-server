@@ -31,7 +31,7 @@ describe("session-manager HTTP (gateway extAuth + events)", () => {
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   });
   const check = async (token: string | undefined, xff = HOME) =>
-    fetch(`${base}/check/mcp`, { method: "POST", headers: { "x-forwarded-for": xff, ...(token ? { authorization: `Bearer ${token}` } : {}) } });
+    fetch(`${base}/check/mcp`, { method: "POST", headers: { "x-gateway-client-address": xff, ...(token ? { authorization: `Bearer ${token}` } : {}) } });
   const admin_ = { authorization: "Bearer admin-secret-admin-secret-1234", "content-type": "application/json" };
 
   it("allows anonymous and tags valid customers with a trust tier", async () => {
@@ -58,10 +58,14 @@ describe("session-manager HTTP (gateway extAuth + events)", () => {
     expect((await check(token, HOME)).status).toBe(401);
   });
 
-  it("uses the last X-Forwarded-For hop (the one the gateway added), not what the client claimed", async () => {
+  it("takes the client address only from the gateway's header, never from a client-supplied X-Forwarded-For", async () => {
     const token = await idp.sign({ sid: "s1" });
-    await check(token, `1.1.1.1, ${HOME}`);
-    expect((await check(token, `2.2.2.2, ${HOME}`)).status).toBe(200); // same real network, spoofed first hop ignored
+    await check(token);
+    const spoofed = await fetch(`${base}/check/mcp`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "x-gateway-client-address": HOME, "x-forwarded-for": "6.6.6.6" },
+    });
+    expect(spoofed.status).toBe(200); // a forged X-Forwarded-For neither trips nor hides the network signal
   });
 
   it("operator and event endpoints require the admin token", async () => {

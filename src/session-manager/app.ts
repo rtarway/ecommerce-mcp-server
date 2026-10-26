@@ -36,6 +36,9 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
  *  - POST /v1/events/keycloak: Keycloak events (webhook or the poller) -> theft playbook.
  *  - POST /v1/customers/:sub/terminate, GET /v1/customers/:sub : operator.
  */
+/** Set by the gateway on every check request from its own view of the connection (deploy/k8s/gateway-policy.yaml). */
+export const CLIENT_ADDRESS_HEADER = "x-gateway-client-address";
+
 export function createSessionManagerApp({ engine, verify, adminToken, resourceMetadataUrl }: SessionManagerAppOptions): Server {
   const isAdmin = (req: IncomingMessage) => {
     const given = /^Bearer (\S+)$/.exec(String(req.headers.authorization ?? ""))?.[1];
@@ -54,8 +57,10 @@ export function createSessionManagerApp({ engine, verify, adminToken, resourceMe
         return send(res, 200, { ok: true }, { "x-trust-tier": "anonymous" });
       }
     }
-    const xff = String(req.headers["x-forwarded-for"] ?? "").split(",").map((h) => h.trim()).filter(Boolean);
-    const source = xff[xff.length - 1] ?? req.socket.remoteAddress ?? "unknown";
+    // The client's network address as the gateway observed it (extAuth addRequestHeaders). Never X-Forwarded-For:
+    // the gateway calls us before it rewrites that header, so it still holds whatever the client sent, and a client
+    // could then forge or hide the network signal theft detection relies on.
+    const source = String(req.headers[CLIENT_ADDRESS_HEADER] ?? "").trim() || req.socket.remoteAddress || "unknown";
     const decision = engine.evaluate({ identity, source, userAgent: String(req.headers["user-agent"] ?? "") || undefined });
     if (decision.action === "deny") {
       const challenge: Record<string, string> = decision.status === 401 ? { "www-authenticate": `Bearer error="invalid_token", error_description="${decision.description}", resource_metadata="${resourceMetadataUrl}"` } : { "retry-after": "60" };
