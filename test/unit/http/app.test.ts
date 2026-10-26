@@ -182,6 +182,19 @@ describe("Sign in on first connect (REQUIRE_SIGN_IN)", () => {
     expect(view).toContain("claude-codescript (client ee0ac5bb)"); // self-declared names are cleaned for display
   });
 
+  it("records each signed-in agent's browsing (search, cart changes) against the customer and the app", async () => {
+    const auth = bearer(await idp.sign({ sub: "cust-browse", azp: "app-1", scope: "shop:api ecommerce:checkout" }));
+    const session = (await h.rpc({ ...INIT, params: { ...INIT.params, clientInfo: { name: "codex", version: "1" } } }, auth)).headers.get("mcp-session-id")!;
+    await h.rpc(call("product_search", { query: "bottle" }), { ...auth, "mcp-session-id": session });
+    await h.rpc(call("add_to_cart", { productId: "bottle-001", quantity: 1 }), { ...auth, "mcp-session-id": session });
+    const browse = h.audit.records.filter((r) => r.event === "browse" && r.sub === "cust-browse");
+    expect(browse.map((r) => [r.tool, r.azp, r.app])).toEqual([
+      ["product_search", "app-1", "codex"],
+      ["add_to_cart", "app-1", "codex"],
+    ]);
+    expect(browse[0]).toMatchObject({ query: "bottle", results: 1 });
+  });
+
   it("advertises both scopes, so clients ask for everything at the first sign-in", async () => {
     const prm = await (await fetch(`${h.base}/.well-known/oauth-protected-resource/mcp`)).json();
     expect(prm.scopes_supported).toEqual(["shop:api", "ecommerce:checkout"]);

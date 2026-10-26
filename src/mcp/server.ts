@@ -93,6 +93,14 @@ export function createShopServer(shop: Shop, ctx: RequestContext, policy: Checko
     source: ctx.source,
   });
 
+  /**
+   * Browsing record (report R5): what each signed-in agent searched for and put in or took out of the cart, tied to
+   * the customer and the app. Personal data: the consent text says so; retention is the log pipeline's (documented).
+   */
+  const browsed = (tool: string, detail: Record<string, unknown>) => {
+    if (ctx.identity) audit.record({ event: "browse", tool, ...who(), app: ctx.clientName, ...detail });
+  };
+
   /** "<app name> (client <id>)" for a signed-in agent: lets the customer see which of their apps added a line. */
   const agentLabel = (): string | undefined => {
     if (!ctx.identity) return undefined;
@@ -117,7 +125,7 @@ export function createShopServer(shop: Shop, ctx: RequestContext, policy: Checko
     "product_search",
     {
       title: "Search products",
-      description: "Search the product catalog. No login needed. All filters are optional.",
+      description: "Search the product catalog. All filters are optional.",
       inputSchema: {
         query: z.string().max(200).optional().describe("Words to look for in product name/description"),
         category: z.string().max(50).optional().describe("e.g. footwear, outdoor, apparel, electronics"),
@@ -130,6 +138,7 @@ export function createShopServer(shop: Shop, ctx: RequestContext, policy: Checko
       const products = shop.catalog
         .search({ query, category, maxPriceCents: maxPrice === undefined ? undefined : Math.round(maxPrice * 100), limit: limit ?? 10 })
         .map(productView);
+      browsed("product_search", { query: query?.slice(0, 100), category, maxPrice, results: products.length });
       return ok(`Found ${products.length} product(s). ${UNTRUSTED_NOTICE}`, { contentTrust: "third-party", products });
     }),
   );
@@ -146,6 +155,7 @@ export function createShopServer(shop: Shop, ctx: RequestContext, policy: Checko
     },
     guarded(({ productId, quantity }) => {
       const cart = cartView(shop.carts.add(cartKey(), productId, quantity, agentLabel()));
+      browsed("add_to_cart", { productId, quantity });
       return ok(`Cart now has ${cart.items.length} line(s), total $${cart.total.toFixed(2)}.`, { cart });
     }),
   );
@@ -189,6 +199,7 @@ export function createShopServer(shop: Shop, ctx: RequestContext, policy: Checko
     guarded(({ productId, quantity }) => {
       const { key } = currentCart();
       const cart = cartView(shop.carts.remove(key, productId, quantity));
+      browsed("remove_from_cart", { productId, quantity });
       return ok(`Removed. Cart now has ${cart.items.length} line(s), total $${cart.total.toFixed(2)}.`, { cart });
     }),
   );

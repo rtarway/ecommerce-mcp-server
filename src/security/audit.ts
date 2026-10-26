@@ -23,7 +23,9 @@ export type AuditEvent =
   | "checkout_blocked"
   | "order_placed"
   | "order_replayed"
-  | "spend_limit_hit";
+  | "spend_limit_hit"
+  /** A signed-in agent searched or changed the cart: the customer's agent browsing behaviour (report R5). */
+  | "browse";
 
 export interface AuditRecord {
   event: AuditEvent;

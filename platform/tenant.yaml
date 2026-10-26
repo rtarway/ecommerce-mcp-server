@@ -23,7 +23,8 @@ idp:
   resourceScopes:
   - name: shop:api
     audience: http://localhost:8000/mcp
-    consentText: Browse the shop and keep a cart as you
+    # Browsing is recorded per customer and app (report R5); the consent screen says so.
+    consentText: Browse the shop and keep a cart as you. The shop records what this app searches for and adds to your cart, for service and security
 
   # Consent the customer gives the agent: start purchases (each purchase still needs approval on the shop's page).
   consentScopes:
