@@ -26,6 +26,11 @@ const schema = z.object({
   ALLOWED_ORIGINS: csv,
   /** Resource scope (carries the audience mapper in Keycloak) added to every challenge and to the advertised scopes. Empty = none. */
   API_SCOPE: z.string().default(""),
+  /**
+   * Sign in on first connect (default): every MCP request needs a token; both scopes are advertised so clients sign
+   * in once. false = the earlier anonymous-first behaviour (browse without a token, step-up for checkout).
+   */
+  REQUIRE_SIGN_IN: z.stringbool().default(true),
 
   // --- sessions, carts, rate limits (all bounded: H1/H2) ---
   SESSION_IDLE_SECONDS: z.coerce.number().int().positive().default(30 * 60),

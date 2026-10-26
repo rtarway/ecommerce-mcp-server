@@ -34,6 +34,12 @@ export interface AppConfig {
   requireDpop?: boolean;
   /** Scope added to every challenge/advertisement so clients obtain tokens that carry this server's audience. */
   apiScope?: string;
+  /**
+   * Sign in on first connect: every MCP request needs a valid token, and both scopes are advertised and challenged
+   * for, so clients sign in once with everything (docs/CLIENT-COMPATIBILITY-REPORT.md R1/R2). Off = anonymous
+   * browsing, only the API scope advertised, the checkout scope asked for by step-up.
+   */
+  requireSignIn?: boolean;
   /** Checkout needs an interactive login newer than this many seconds (0 = no check). */
   checkoutMaxAuthAgeSeconds?: number;
   /**
@@ -46,7 +52,7 @@ export interface AppConfig {
   now?: () => number;
 }
 
-/** Tool name -> scope required to call it. Everything else is open to anonymous visitors. */
+/** Tool name -> scope required to call it. Everything else is open to anonymous visitors (when sign-in is not required). */
 const PROTECTED_TOOLS: Record<string, string> = { one_step_checkout: CHECKOUT_SCOPE, list_orders: CHECKOUT_SCOPE };
 
 const MAX_BODY_BYTES = 1_000_000;
@@ -75,6 +81,11 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+/** What the customer should do, in words an agent can pass on. Never asks for a password or token. */
+export const SIGN_IN_NEEDED = "Connect your shop account: sign in to the shop in your app's MCP settings, then try again.";
+export const SIGN_IN_ENDED = "Your shop sign-in has ended. Sign out of the shop in your app's MCP settings, then sign in again.";
+export const PURCHASE_SCOPE_NEEDED = "Your shop sign-in does not allow purchases yet. Sign in to the shop again in your app's MCP settings and allow purchases.";
+
 const messages = (body: unknown) => (Array.isArray(body) ? body : [body]) as { method?: string; params?: { name?: string } }[];
 
 function requiredScopes(body: unknown): string[] {
@@ -92,9 +103,11 @@ export function createApp(config: AppConfig): Server {
   const limiter = new RateLimiter(now);
   const dpopCache = new ProofReplayCache(now);
   const sessions = config.sessions ?? new SessionRegistry({ idleMs: 30 * 60_000, maxAgeMs: 24 * 3600_000, maxSessions: 10_000, maxPerSource: 200, now, newId: randomUUID });
-  // Scope minimisation (MCP security best practices): advertise only what basic use needs; the checkout scope is
-  // asked for by step-up challenges when a tool needs it.
-  const baseScopes = config.apiScope ? [config.apiScope] : [];
+  const signInFirst = config.requireSignIn ?? false;
+  // Sign-in first: advertise and ask for every scope at once, so clients sign in and consent once (no step-up, which
+  // few clients support). Otherwise scope minimisation (MCP security best practices): advertise only what browsing
+  // needs and ask for the checkout scope by step-up when a tool needs it.
+  const baseScopes = [...(config.apiScope ? [config.apiScope] : []), ...(signInFirst ? [CHECKOUT_SCOPE] : [])];
   const challengeScopes = (needed: string[]) => [...new Set([...baseScopes, ...needed])].join(" ");
   const allowedOrigins = new Set(config.allowedOrigins ?? []);
 
@@ -118,7 +131,7 @@ export function createApp(config: AppConfig): Server {
   };
 
   const challenge = (res: ServerResponse, status: number, error: string, extra: Parameters<typeof wwwAuthenticate>[0]) =>
-    sendJson(res, status, { error }, { "www-authenticate": wwwAuthenticate(extra) });
+    sendJson(res, status, { error, ...(extra.description ? { error_description: extra.description } : {}) }, { "www-authenticate": wwwAuthenticate(extra) });
 
   const handleMcp = async (req: IncomingMessage, res: ServerResponse) => {
     if (originRefused(req, res)) return;
@@ -145,7 +158,7 @@ export function createApp(config: AppConfig): Server {
       console.log(`mcp request methods=${methods.join(",")} headers=${Object.keys(req.headers).sort().join(",")}`);
     }
 
-    // --- who is calling: token (optional for browsing), sender-constraint, step-up ---
+    // --- who is calling: token (required when signing in first, else optional for browsing), sender-constraint, step-up ---
     const needed = requiredScopes(body);
     let identity: Identity | undefined;
     const credential = parseAuthorization(req.headers.authorization);
@@ -156,7 +169,7 @@ export function createApp(config: AppConfig): Server {
       } catch (err) {
         if (!(err instanceof InvalidTokenError)) throw err;
         audit.record({ event: "token_rejected", source, reason: err.message });
-        return challenge(res, 401, "invalid_token", { resourceMetadataUrl, error: "invalid_token", scope: challengeScopes(needed) });
+        return challenge(res, 401, "invalid_token", { resourceMetadataUrl, error: "invalid_token", scope: challengeScopes(needed), description: SIGN_IN_ENDED });
       }
       // A token bound to a key must come with a proof from that key, presented under the DPoP scheme.
       // Accepting it as a plain Bearer would let a thief simply "downgrade" the stolen token.
@@ -173,16 +186,22 @@ export function createApp(config: AppConfig): Server {
       }
     }
 
+    if (signInFirst && !identity) {
+      // Every client we tested signs in on a connect-time 401; few start a sign-in in the middle of a session.
+      audit.record({ event: "sign_in_required", source });
+      return challenge(res, 401, "unauthorized", { resourceMetadataUrl, scope: challengeScopes(needed), description: SIGN_IN_NEEDED });
+    }
+
     if (needed.length > 0) {
       if (!identity) {
         audit.record({ event: "step_up_required", source, reason: "no_token" });
-        return challenge(res, 401, "unauthorized", { resourceMetadataUrl, scope: challengeScopes(needed) });
+        return challenge(res, 401, "unauthorized", { resourceMetadataUrl, scope: challengeScopes(needed), description: SIGN_IN_NEEDED });
       }
       const missing = needed.filter((s) => !identity.scopes.includes(s));
       if (missing.length > 0) {
         const scope = [...new Set([...identity.scopes, ...needed])].join(" ");
         audit.record({ event: "step_up_required", source, sub: identity.subject, azp: identity.clientId, reason: "scope" });
-        return challenge(res, 403, "insufficient_scope", { resourceMetadataUrl, scope, error: "insufficient_scope" });
+        return challenge(res, 403, "insufficient_scope", { resourceMetadataUrl, scope, error: "insufficient_scope", description: PURCHASE_SCOPE_NEEDED });
       }
       const maxAge = config.checkoutMaxAuthAgeSeconds ?? 0;
       if (maxAge > 0 && (identity.authTime === undefined || now() / 1000 - identity.authTime > maxAge)) {

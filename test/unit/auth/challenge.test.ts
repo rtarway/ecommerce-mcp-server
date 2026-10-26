@@ -18,4 +18,9 @@ describe("wwwAuthenticate", () => {
       `Bearer error="invalid_token", resource_metadata="${rm}"`,
     );
   });
+  it("adds error_description, stripping quotes and backslashes so the header stays well formed", () => {
+    expect(wwwAuthenticate({ resourceMetadataUrl: "https://x/prm", description: 'Sign "in" \\now' })).toBe(
+      'Bearer resource_metadata="https://x/prm", error_description="Sign in now"',
+    );
+  });
 });

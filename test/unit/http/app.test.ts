@@ -9,7 +9,7 @@ import { createTokenVerifier } from "../../../src/auth/tokens.js";
 import { MemoryAudit } from "../../../src/security/audit.js";
 import { SessionRegistry } from "../../../src/session/registry.js";
 import { buildShop } from "../../../src/domain/shop.js";
-import { createApp, type AppConfig } from "../../../src/http/app.js";
+import { PURCHASE_SCOPE_NEEDED, SIGN_IN_ENDED, SIGN_IN_NEEDED, createApp, type AppConfig } from "../../../src/http/app.js";
 
 const PRM_URL = "http://localhost:8000/.well-known/oauth-protected-resource/mcp";
 
@@ -90,14 +90,14 @@ describe("HTTP gate", () => {
   it("challenges anonymous one_step_checkout with 401 + scope (incl. the API scope) + resource metadata", async () => {
     const res = await h.rpc(call("one_step_checkout"));
     expect(res.status).toBe(401);
-    expect(res.headers.get("www-authenticate")).toBe(`Bearer resource_metadata="${PRM_URL}", scope="shop:api ecommerce:checkout"`);
+    expect(res.headers.get("www-authenticate")).toBe(`Bearer resource_metadata="${PRM_URL}", scope="shop:api ecommerce:checkout", error_description="${SIGN_IN_NEEDED}"`);
   });
 
   it("answers 403 insufficient_scope (step-up) when the token lacks the checkout scope", async () => {
     const token = await idp.sign({ scope: "openid email" });
     const res = await h.rpc(call("one_step_checkout"), bearer(token));
     expect(res.status).toBe(403);
-    expect(res.headers.get("www-authenticate")).toBe(`Bearer error="insufficient_scope", resource_metadata="${PRM_URL}", scope="openid email ecommerce:checkout"`);
+    expect(res.headers.get("www-authenticate")).toBe(`Bearer error="insufficient_scope", resource_metadata="${PRM_URL}", scope="openid email ecommerce:checkout", error_description="${PURCHASE_SCOPE_NEEDED}"`);
   });
 
   it("an invalid token on an ordinary call is challenged for the base scope only", async () => {
@@ -137,6 +137,47 @@ describe("HTTP gate", () => {
     expect(huge === undefined || huge.status === 413).toBe(true);
     expect((await fetch(`${h.base}/mcp`, { method: "GET" })).status).toBe(405);
     expect((await fetch(`${h.base}/nope`)).status).toBe(404);
+  });
+});
+
+describe("Sign in on first connect (REQUIRE_SIGN_IN)", () => {
+  let h: Harness;
+  beforeAll(async () => {
+    h = await start({ apiScope: "shop:api", requireSignIn: true });
+  });
+  afterAll(() => h.close());
+
+  it("refuses initialize without a token: 401 naming both scopes and what the customer should do", async () => {
+    const res = await h.rpc(INIT);
+    expect(res.status).toBe(401);
+    expect(res.headers.get("mcp-session-id")).toBeNull();
+    expect(res.headers.get("www-authenticate")).toBe(`Bearer resource_metadata="${PRM_URL}", scope="shop:api ecommerce:checkout", error_description="${SIGN_IN_NEEDED}"`);
+    expect(await res.json()).toEqual({ error: "unauthorized", error_description: SIGN_IN_NEEDED });
+    expect(h.audit.events()).toContain("sign_in_required");
+  });
+
+  it("refuses browsing without a token too (no anonymous tool calls)", async () => {
+    const res = await h.rpc(call("product_search", { query: "bottle" }));
+    expect(res.status).toBe(401);
+  });
+
+  it("connects, browses and checks out with one sign-in carrying both scopes (no step-up)", async () => {
+    const auth = bearer(await idp.sign({ scope: "shop:api ecommerce:checkout" }));
+    const session = await h.init(auth);
+    const headers = { ...auth, "mcp-session-id": session };
+    expect((await h.rpc(call("product_search", { query: "bottle" }), headers)).status).toBe(200);
+    expect((await h.rpc(call("list_orders"), headers)).status).toBe(200);
+  });
+
+  it("advertises both scopes, so clients ask for everything at the first sign-in", async () => {
+    const prm = await (await fetch(`${h.base}/.well-known/oauth-protected-resource/mcp`)).json();
+    expect(prm.scopes_supported).toEqual(["shop:api", "ecommerce:checkout"]);
+  });
+
+  it("tells the customer to sign in again when the token is no longer valid", async () => {
+    const res = await h.rpc(INIT, bearer("garbage"));
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toContain(`error_description="${SIGN_IN_ENDED}"`);
   });
 });
 

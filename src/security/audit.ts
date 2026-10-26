@@ -12,6 +12,7 @@ export type AuditEvent =
   | "token_rejected"
   | "dpop_rejected"
   | "step_up_required"
+  | "sign_in_required"
   | "cart_claimed"
   | "approval_requested"
   | "approval_granted"

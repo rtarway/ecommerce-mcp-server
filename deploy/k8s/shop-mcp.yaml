@@ -30,6 +30,9 @@ spec:
         - { name: RESOURCE_URL, value: "http://localhost:8000/mcp" }
         - { name: PUBLIC_BASE_URL, value: "http://localhost:8000" }
         - { name: API_SCOPE, value: "shop:api" }
+        # Sign in on first connect: every MCP request needs a token, both scopes advertised (report R1/R2).
+        # "false" restores the anonymous-first behaviour (tag pre-sign-in-on-connect).
+        - { name: REQUIRE_SIGN_IN, value: "true" }
         # Browser origins allowed to call /mcp (MCP Streamable HTTP MUST: validate Origin against DNS rebinding).
         # MCP Inspector's web UI; requests without an Origin (CLI/desktop agents) are allowed, any other origin gets 403.
         - { name: ALLOWED_ORIGINS, value: "http://localhost:6274,http://127.0.0.1:6274,http://localhost:6277,http://127.0.0.1:6277" }

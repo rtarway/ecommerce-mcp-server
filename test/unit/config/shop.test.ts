@@ -24,6 +24,11 @@ describe("loadConfig", () => {
     expect(config.DEMO_PROFILE_SUBJECTS).toEqual([]);
   });
 
+  it("signs in on first connect by default; REQUIRE_SIGN_IN=false restores anonymous browsing", () => {
+    expect(loadConfig(env).REQUIRE_SIGN_IN).toBe(true);
+    expect(loadConfig({ ...env, REQUIRE_SIGN_IN: "false" }).REQUIRE_SIGN_IN).toBe(false);
+  });
+
   it("refuses to start with approvals required but no way to serve the approval page", () => {
     const { PUBLIC_BASE_URL: _unused, ...noBase } = env;
     expect(() => loadConfig(noBase)).toThrow(/PUBLIC_BASE_URL/);

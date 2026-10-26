@@ -72,6 +72,7 @@ const app = createApp({
   trustGatewayHeaders: config.TRUST_GATEWAY_HEADERS,
   requireDpop: config.REQUIRE_DPOP,
   apiScope: config.API_SCOPE || undefined,
+  requireSignIn: config.REQUIRE_SIGN_IN,
   checkoutMaxAuthAgeSeconds: config.CHECKOUT_MAX_AUTH_AGE_SECONDS,
   allowedOrigins: config.ALLOWED_ORIGINS,
   requestsPerMinute: config.REQUESTS_PER_MINUTE_PER_SOURCE,
