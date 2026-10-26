@@ -45,9 +45,12 @@ class Cookies {
   }
 }
 
-export async function loginWithPkce(p: LoginParams) {
-  const verifier = randomBytes(32).toString("base64url");
-  const challenge = createHash("sha256").update(verifier).digest("base64url");
+/**
+ * The browser half of a sign-in: opens an authorization URL (built by us or by an agent harness), signs in on
+ * Keycloak's login page, accepts the consent page if one appears, and stops at the client's redirect URI. Returns
+ * that callback URL (code + state) without calling it.
+ */
+export async function authorizeInBrowser(p: { authorizationUrl: string; redirectUri: string; username: string; password: string }) {
   const cookies = new Cookies();
   const get = async (url: string, init: RequestInit = {}) => {
     const res = await fetch(url, { redirect: "manual", ...init, headers: { cookie: cookies.header(), ...(init.headers as object) } });
@@ -61,29 +64,18 @@ export async function loginWithPkce(p: LoginParams) {
     return loc?.startsWith(p.redirectUri) ? new URL(loc) : undefined;
   };
 
-  const authUrl = new URL(p.authorizationEndpoint);
-  authUrl.search = new URLSearchParams({
-    response_type: "code",
-    client_id: p.clientId,
-    redirect_uri: p.redirectUri,
-    scope: p.scope,
-    state: "xyz",
-    ...(p.pkce === false ? {} : { code_challenge: challenge, code_challenge_method: "S256" }),
-    ...p.authParams,
-  }).toString();
-
-  const loginPage = await get(authUrl.toString());
+  const loginPage = await get(p.authorizationUrl);
   const loginHtml = await loginPage.text();
   /** Follows Keycloak-internal redirects, stopping at the client redirect_uri or a rendered page. */
   const settle = async (first: Response) => {
     let res = first;
     for (let hops = 0; hops < 8 && res.status >= 300 && res.status < 400 && !redirectedWithCode(res); hops++) {
-      res = await get(new URL(res.headers.get("location")!, p.authorizationEndpoint).toString());
+      res = await get(new URL(res.headers.get("location")!, p.authorizationUrl).toString());
     }
     return res;
   };
   let res = await settle(
-    await post(formAction(loginHtml, p.authorizationEndpoint), new URLSearchParams({ username: p.username, password: p.password, credentialId: "" })),
+    await post(formAction(loginHtml, p.authorizationUrl), new URLSearchParams({ username: p.username, password: p.password, credentialId: "" })),
   );
 
   let consentShown = false;
@@ -94,10 +86,27 @@ export async function loginWithPkce(p: LoginParams) {
     consentShown = true;
     const form = new URLSearchParams({ accept: "Yes" });
     for (const tag of hiddenInputs(html)) form.set(attr(tag, "name")!, attr(tag, "value") ?? "");
-    res = await settle(await post(formAction(html, p.authorizationEndpoint), form));
+    res = await settle(await post(formAction(html, p.authorizationUrl), form));
     done = redirectedWithCode(res);
     if (!done) throw new Error(`consent not accepted (status ${res.status})`);
   }
+  return { callback: done, consentShown };
+}
+
+export async function loginWithPkce(p: LoginParams) {
+  const verifier = randomBytes(32).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  const authUrl = new URL(p.authorizationEndpoint);
+  authUrl.search = new URLSearchParams({
+    response_type: "code",
+    client_id: p.clientId,
+    redirect_uri: p.redirectUri,
+    scope: p.scope,
+    state: "xyz",
+    ...(p.pkce === false ? {} : { code_challenge: challenge, code_challenge_method: "S256" }),
+    ...p.authParams,
+  }).toString();
+  const { callback: done, consentShown } = await authorizeInBrowser({ authorizationUrl: authUrl.toString(), redirectUri: p.redirectUri, username: p.username, password: p.password });
 
   const code = done.searchParams.get("code");
   if (!code) throw new Error(`no code in redirect: ${done}`);

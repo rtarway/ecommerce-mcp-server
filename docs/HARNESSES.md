@@ -41,6 +41,25 @@ Start from a clean shop: `kubectl -n mcp-servers rollout restart deploy/ecommerc
 
 ---
 
+## Sign-in-first results (REQUIRE_SIGN_IN=true, 2026-10-26)
+
+Milestone 1 check of [plans/SIGN-IN-ON-CONNECT.md](plans/SIGN-IN-ON-CONNECT.md). Run headlessly from this machine:
+the harness CLIs drive the agent; `scripts/sign-in-for-harness.ts` stands in for the customer's browser at sign-in
+and `scripts/approve-as-customer.ts` on the approval page. Every step verified in the shop audit log.
+
+| Client | Before sign-in (connect-time 401) | How the customer signs in | Granted | Journey on one sign-in |
+|---|---|---|---|---|
+| Codex 0.163.0 | Server marked unavailable (`AuthRequired`); no sign-in started. Agent: "the shop MCP server isn't available … connect or enable it" (does not relay the shop's text) | `codex mcp login shop` | `shop:api ecommerce:checkout offline_access` | ✅ search, cart, approval link, order, `list_orders` in a later run |
+| Claude Code 2.1.308 | `/mcp` shows "Needs authentication". Agent: sign in via `/mcp` → shop; "never paste codes or tokens" | `/mcp` → Authenticate, or `claude mcp login shop` | `shop:api ecommerce:checkout offline_access` (forces `prompt=consent`; registers a new client on every login) | ✅ same journey |
+| OpenClaw 2026.10.3 (`auth: oauth`, shared) | Server hidden until signed in (as before) | `openclaw mcp login shop` | `openid shop:api ecommerce:checkout` (**no** `offline_access`: the sign-in lasts 30 min idle / 10 h) | ✅ same journey; first full OpenClaw purchase |
+| MCP Inspector (CLI) | `auth_required` | automatic | — | ✅ (`scripts/inspector-smoke.sh`, 12 checks) |
+| Hermes | **not run**: needs a model provider key (it was reset); the customer's step is `hermes mcp login shop` with `auth: oauth` | — | — | to do |
+
+**Gate verdict:** pass for Codex, Claude Code, OpenClaw and Inspector: one sign-in, then everything. No client asked for
+a second sign-in or step-up. Codex and OpenClaw do not start the sign-in themselves on the connect-time 401; the
+customer runs one command (Claude Code and Inspector prompt for it). Hermes, the client this design was chiefly
+for, still has to be run.
+
 ## 1. OpenClaw (formerly Clawdbot)
 
 Docs (repository `openclaw/openclaw`): `docs/cli/mcp/transports.md` (MCP OAuth), `docs/tools/mcp.md`,
