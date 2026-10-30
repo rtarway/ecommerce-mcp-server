@@ -295,7 +295,9 @@ revision **2025-11-25** (sessions, `initialize`); the current revision is **2026
 14. **Retirement and expiry messaging**: Codex and OpenClaw do not tell the customer how to sign in again after their
     client is retired (Codex: "connect or enable the server"; OpenClaw: guesses). The shop's `error_description` is
     not relayed by them.
-15. **OpenClaw does not request `offline_access`**: its sign-in ends with the Keycloak session (30 min idle, 10 h).
+15. **Clients without an offline token sign in again after the Keycloak session ends** (30 min idle, 10 h): seen
+    with OpenClaw, which requests exactly the scope configured for it; the lab configuration left out `offline_access`
+    (HARNESSES A.4 now includes it; to verify).
 9. **DPoP with a real client**, then consider requiring it for the checkout scope.
 10. **Per-tool authorization at the edge** (CEL on `jwt.scope`); the server enforces it today.
 11. **Platform identity provider:** exact redirect URIs for the test client (no wildcards); do not advertise `plain` PKCE.

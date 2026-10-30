@@ -25,7 +25,7 @@ R1–R7 are implemented and running (plan: [plans/SIGN-IN-ON-CONNECT.md](plans/S
 |---|---|---|---|
 | Claude Code 2.1.308 | ✅ prompts the customer itself (`/mcp`) | "Needs authentication"; tells the customer how; `/mcp` recovers | ✅ offline token, no sign-in |
 | Codex 0.163.0 | ✅ after `codex mcp login shop` (does not start it on the 401) | Shop silently unavailable; `codex mcp login shop` recovers | ✅ offline token, no sign-in |
-| OpenClaw 2026.10.3 | ✅ after `openclaw mcp login shop`; first full OpenClaw purchase | Status still "authorized", agent guesses; `openclaw mcp login shop` recovers | ❌ no offline token: sign in again |
+| OpenClaw 2026.10.3 | ✅ after `openclaw mcp login shop`; first full OpenClaw purchase | Status still "authorized", agent guesses; `openclaw mcp login shop` recovers | ❌ in this run: the scope configured for it left out `offline_access`, so no offline token (to retest with it) |
 | MCP Inspector | ✅ | — | — |
 | Hermes | not run (needs a model provider key) | — | — |
 
