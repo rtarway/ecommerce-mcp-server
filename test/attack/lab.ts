@@ -438,7 +438,11 @@ const scenarios: Scenario[] = [
         await sleep(65_000);
         const anonRefused = anon.every((c) => c === 401 || c === 429);
         const limited = signed.filter((c) => c === 429).length;
-        const tally = (codes: number[]) => Object.entries(codes.reduce<Record<number, number>>((m, c) => ({ ...m, [c]: (m[c] ?? 0) + 1 }), {})).map(([c, n]) => `${n}×${c}`).join(", ");
+        const tally = (codes: number[]) => {
+          const counts = new Map<number, number>();
+          for (const c of codes) counts.set(c, (counts.get(c) ?? 0) + 1);
+          return [...counts].map(([c, n]) => `${n}×${c}`).join(", ");
+        };
         return anonRefused && limited > 0 ? held(`no token: all 150 refused (${tally(anon)}), no session created; signed in: ${tally(signed)}`) : breach(`no token: ${tally(anon)}; signed in: ${tally(signed)}`);
       }
       const codes = await Promise.all(Array.from({ length: 150 }, () => new McpClient().post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "f", version: "1" } } }).then((r) => r.status)));
